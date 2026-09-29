@@ -6,11 +6,11 @@
 
 web
 
-The interface will run in a Tauri Linux desktop app, initially on CachyOS with Hyprland. This is not a browser-only product. The current deliverable is a standalone HTML UI mockup.
+The interface runs in a Tauri Linux desktop app, initially on CachyOS with Hyprland. The browser development view uses clearly labeled temporary demo notes.
 
 ## Stack
 
-User-approved: Tauri, React, TypeScript, and Tailwind. CodeMirror is the proposed editor. The disposable visual mockup uses plain HTML and CSS without app dependencies.
+User-approved: Tauri, React, TypeScript, and Tailwind. CodeMirror owns editing. The approved visual reference remains in `mockups/main-ui.html`.
 
 ## Users and purpose
 
@@ -38,4 +38,4 @@ The user supplied a Zed screenshot and requested a compact dark editor with thin
 
 ## Current scope
 
-One really simple mockup of the main interface. All sample notes are illustrative. No file operations, persistence, working editor, performance validation, or production app implementation are included in this mockup. App name remains undecided.
+First working desktop build, including workspace folders, Markdown editing and preview, autosave, title/tag search, tabs, split panes, and existing images. See `README.md` for commands, verification, and current limits. App name remains undecided; “Notes” is the working name.
