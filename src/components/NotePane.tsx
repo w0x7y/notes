@@ -184,11 +184,6 @@ function NoteView({
           <input
             ref={titleInput}
             className="note-title"
-            style={{
-              fontFamily: preferences.customFont
-                ? editorFontFamily(preferences)
-                : undefined,
-            }}
             aria-label="Note title"
             placeholder="Untitled"
             dir="auto"

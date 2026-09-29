@@ -33,7 +33,7 @@ it("fills new typography defaults in older saved preferences", () => {
   expect(preferences.fontWeight).toBe(400);
   expect(preferences.letterSpacing).toBe(0);
   expect(preferences.noteWidth).toBe(940);
-  expect(editorFontFamily(preferences)).toBe("var(--font-ui)");
+  expect(editorFontFamily(preferences)).toBe("var(--font-sans)");
 });
 
 it("accepts installed font names and bounds typography values", () => {

@@ -15,7 +15,8 @@
   --green: #98c379;
   --yellow: #e5c07b;
   --red: #e06c75;
-  --font-ui: "Adwaita Sans", "DejaVu Sans", sans-serif;
+  --font-sans: "Adwaita Sans", "DejaVu Sans", sans-serif;
+  --font-ui: var(--font-sans);
   --font-mono: "JetBrains Mono", "DejaVu Sans Mono", monospace;
   font: 13px/1.5 var(--font-ui);
   color: var(--text);
@@ -35,6 +36,7 @@ body,
 }
 button,
 input,
+textarea,
 select {
   font: inherit;
   color: inherit;
@@ -71,7 +73,7 @@ svg {
   flex: none;
 }
 kbd {
-  font: 10px var(--font-mono);
+  font: 10px var(--font-ui);
   color: var(--muted);
   white-space: nowrap;
 }

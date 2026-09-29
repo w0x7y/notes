@@ -34,7 +34,7 @@ export function editorFontFamily(
   preferences: Pick<Preferences, "editorFont" | "customFont">,
 ): string {
   const fallback =
-    preferences.editorFont === "mono" ? "var(--font-mono)" : "var(--font-ui)";
+    preferences.editorFont === "mono" ? "var(--font-mono)" : "var(--font-sans)";
   // Treat the entered family as one CSS string, including names with punctuation.
   const custom = preferences.customFont.trim();
   return custom ? `${JSON.stringify(custom)}, ${fallback}` : fallback;

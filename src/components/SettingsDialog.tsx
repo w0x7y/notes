@@ -188,9 +188,12 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                     <output>{draft.lineHeight.toFixed(1)}</output>
                   </div>
                 </Row>
-                <Row label="Editor font">
+                <Row
+                  label="Font family"
+                  hint="Applies to notes and the app interface."
+                >
                   <Choice
-                    label="Editor font"
+                    label="Font family"
                     value={draft.editorFont}
                     options={[
                       { value: "mono", label: "Monospace" },

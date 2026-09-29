@@ -1,4 +1,12 @@
-import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useState,
+  type CSSProperties,
+} from "react";
+import { editorFontFamily } from "./domain/preferences";
 import {
   BookOpen,
   FileText,
@@ -98,6 +106,10 @@ type Modal =
 
 export default function App() {
   const state = useApp();
+  const typography: CSSProperties & { "--font-ui": string } = {
+    "--font-ui": editorFontFamily(state.preferences),
+    fontFamily: "var(--font-ui)",
+  };
   const [modal, setModal] = useState<Modal>(null);
   const [sidebar, setSidebar] = useState(true);
   const [selectedFolder, setSelectedFolder] = useState("");
@@ -314,6 +326,7 @@ export default function App() {
   return (
     <div
       className={`app-shell ${sidebar ? "" : "sidebar-hidden"}`}
+      style={typography}
       onContextMenu={(event) => event.preventDefault()}
     >
       {sidebar && (

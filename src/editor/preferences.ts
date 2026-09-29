@@ -52,8 +52,8 @@ export function editorPreferenceExtensions(
         fontFamily,
         fontWeight: String(preferences.fontWeight),
         letterSpacing: `${preferences.letterSpacing}px`,
+        lineHeight: String(preferences.lineHeight),
       },
-      ".cm-line": { lineHeight: String(preferences.lineHeight) },
       ".cm-gutters": {
         backgroundColor: "transparent",
         border: "none",

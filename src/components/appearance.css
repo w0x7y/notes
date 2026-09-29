@@ -168,7 +168,7 @@
 .appearance-custom-color input {
   width: 112px;
   padding: 6px 8px;
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   text-transform: uppercase;
 }
 
