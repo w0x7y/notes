@@ -147,6 +147,16 @@ export default function App() {
   useEffect(() => {
     const keyboard = (event: KeyboardEvent) => {
       if (!event.ctrlKey && !event.metaKey) return;
+      if (document.querySelector(".drawing-dialog[open]")) {
+        if (event.key.toLowerCase() === "s") {
+          event.preventDefault();
+          run(flushAll());
+        } else if (
+          ["w", "n", "p", ",", "tab", "\\"].includes(event.key.toLowerCase())
+        )
+          event.preventDefault();
+        return;
+      }
       if (document.querySelector('dialog[aria-busy="true"]')) {
         event.preventDefault();
         return;

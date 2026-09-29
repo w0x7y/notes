@@ -16,6 +16,16 @@ const parser = new MarkdownIt({
   .use(taskLists)
   .use(katex, { throwOnError: false, trust: false });
 
+const renderFence = parser.renderer.rules.fence;
+parser.renderer.rules.fence = (tokens, index, options, env, self) => {
+  // The lazy canvas preview reads token.content directly. Avoid producing and
+  // sanitizing a second, potentially large HTML copy of the drawing JSON.
+  if (tokens[index]?.info.trim() === "notes-drawing") return "<p>Drawing</p>\n";
+  return renderFence
+    ? renderFence(tokens, index, options, env, self)
+    : self.renderToken(tokens, index, options);
+};
+
 parser.inline.ruler.before("link", "wiki_link", (state, silent) => {
   const tail = state.src.slice(state.pos);
   const match = /^(!?)\[\[([^\]\n]+)\]\]/.exec(tail);
@@ -72,6 +82,7 @@ export type MarkdownBlock = {
   to: number;
   source: string;
   html: string;
+  drawing?: string;
 };
 
 export function markdownBlocks(body: string): MarkdownBlock[] {
@@ -99,6 +110,17 @@ export function markdownBlocks(body: string): MarkdownBlock[] {
       parser.options,
       environment,
     );
-    return { from, to, source, html };
+    const token = tokens[tokenFrom];
+    const drawing =
+      token?.type === "fence" && token.info.trim() === "notes-drawing"
+        ? token.content
+        : undefined;
+    return {
+      from,
+      to,
+      source,
+      html,
+      ...(drawing === undefined ? {} : { drawing }),
+    };
   });
 }

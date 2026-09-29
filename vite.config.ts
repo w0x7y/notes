@@ -6,5 +6,5 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   clearScreen: false,
   server: { watch: { ignored: ["**/src-tauri/**"] } },
-  build: { target: "es2022" },
+  build: { target: "es2022", manifest: true },
 });

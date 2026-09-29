@@ -13,6 +13,7 @@ import {
   PencilLine,
   TriangleAlert,
   Type,
+  PencilRuler,
 } from "lucide-react";
 import type { NoteDocument } from "../domain/document";
 import {
@@ -42,6 +43,11 @@ import { editorFontFamily } from "../domain/preferences";
 const LivePreview = lazy(() =>
   import("../editor/LivePreview").then((module) => ({
     default: module.LivePreview,
+  })),
+);
+const DrawingDialog = lazy(() =>
+  import("../drawing/DrawingDialog").then((module) => ({
+    default: module.DrawingDialog,
   })),
 );
 
@@ -76,6 +82,12 @@ function NoteView({
   );
   const toolbar = useApp((state) => state.toolbarVisible);
   const preferences = useApp((state) => state.preferences);
+  const [drawing, setDrawing] = useState<{ source?: string } | null>(null);
+  const [previewVersion, refreshPreview] = useState(0);
+  const openDrawing = useCallback(
+    (source: string) => setDrawing({ source }),
+    [],
+  );
   const [preview, setPreview] = useState(
     () => useApp.getState().preferences.defaultPreview,
   );
@@ -120,6 +132,14 @@ function NoteView({
           </button>
         </div>
         <div className="view-controls">
+          <button
+            className="view-button"
+            title="Open or create a drawing in this note"
+            onClick={() => setDrawing({})}
+          >
+            <PencilRuler size={15} />
+            <span>Drawing</span>
+          </button>
           <button
             className="view-button"
             title="Toggle formatting toolbar"
@@ -186,10 +206,12 @@ function NoteView({
           {preview ? (
             <Suspense fallback={<p className="muted">Loading preview…</p>}>
               <LivePreview
+                key={previewVersion}
                 document={document}
                 externalVersion={snapshot.externalVersion}
                 editorRef={editor}
                 onLink={onLink}
+                onDrawing={openDrawing}
               />
             </Suspense>
           ) : (
@@ -211,6 +233,18 @@ function NoteView({
           )}
         </article>
       </div>
+      {drawing && (
+        <Suspense fallback={null}>
+          <DrawingDialog
+            document={document}
+            source={drawing.source}
+            onClose={() => {
+              setDrawing(null);
+              refreshPreview((version) => version + 1);
+            }}
+          />
+        </Suspense>
+      )}
     </>
   );
 }

@@ -1,5 +1,7 @@
 import {
   memo,
+  lazy,
+  Suspense,
   useEffect,
   useMemo,
   useRef,
@@ -14,12 +16,18 @@ import { useApp, showError } from "../domain/app-store";
 import { files, openExternalLink } from "../platform";
 import { CodeEditor, type EditorHandle } from "./CodeEditor";
 import { markdownBlocks } from "./markdown";
+const DrawingPreview = lazy(() =>
+  import("../drawing/DrawingPreview").then((module) => ({
+    default: module.DrawingPreview,
+  })),
+);
 
 type Props = {
   document: NoteDocument;
   externalVersion: number;
   editorRef: RefObject<EditorHandle | null>;
   onLink: (target: string) => void;
+  onDrawing: (source: string) => void;
 };
 
 export const LivePreview = memo(function LivePreview({
@@ -27,6 +35,7 @@ export const LivePreview = memo(function LivePreview({
   externalVersion,
   editorRef,
   onLink,
+  onDrawing,
 }: Props) {
   const [body, setBody] = useState(() => splitNote(document.content).body);
   const [active, setActive] = useState<number | null>(null);
@@ -94,7 +103,17 @@ export const LivePreview = memo(function LivePreview({
   return (
     <div className="live-preview" ref={host}>
       {blocks.map((block, index) =>
-        active === index ? (
+        block.drawing !== undefined ? (
+          <Suspense
+            key={index}
+            fallback={<p className="muted">Loading drawing…</p>}
+          >
+            <DrawingPreview
+              json={block.drawing}
+              onEdit={() => onDrawing(block.source)}
+            />
+          </Suspense>
+        ) : active === index ? (
           <div className="preview-source" key={index}>
             <CodeEditor
               ref={editorRef}

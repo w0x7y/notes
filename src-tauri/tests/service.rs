@@ -1407,3 +1407,39 @@ fn slow_scan_does_not_block_note_saves_or_other_workspace_scans() {
         "# Saved"
     );
 }
+
+#[test]
+fn drawing_blocks_round_trip_as_notes_without_polluting_search_metadata() {
+    let (config, service) = service();
+    let root = tempdir().unwrap();
+    let workspace = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace;
+    let note = service.create_note(&workspace.id, "").unwrap();
+    let content = "# Diagram\n\n#school\n\n```notes-drawing\n{\"version\":1,\"id\":\"demo\",\"shapes\":[{\"kind\":\"text\",\"id\":\"t\",\"x\":0,\"y\":0,\"color\":\"#61AFEF\",\"stroke\":2,\"size\":24,\"text\":\"שלום #private\"}]}\n```\n";
+    let saved = service
+        .save_note(&workspace.id, &note.path, content, &note.revision)
+        .unwrap();
+    assert_eq!(
+        fs::read_to_string(root.path().join(&saved.path)).unwrap(),
+        content
+    );
+    drop(service);
+    let restarted = Service::new(config.path().to_path_buf()).unwrap();
+    assert_eq!(
+        restarted
+            .read_note(&workspace.id, &saved.path)
+            .unwrap()
+            .content,
+        content
+    );
+    let scan = restarted.scan_workspace(&workspace.id).unwrap();
+    let entry = scan
+        .entries
+        .iter()
+        .find(|entry| entry.path == saved.path)
+        .unwrap();
+    assert_eq!(entry.title, "Diagram");
+    assert_eq!(entry.tags, ["school"]);
+}
