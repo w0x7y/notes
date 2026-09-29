@@ -1,0 +1,211 @@
+<!doctype html>
+<!-- Disposable main-UI mockup. Sample content only; no editing, saving, or filesystem access. -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
+  <title>Notes · One Dark Pro mockup</title>
+  <style>
+    /* One Dark Pro: https://github.com/Binaryify/OneDark-Pro/blob/master/themes/OneDark-Pro.json */
+    :root { --editor:#282c34; --sidebar:#21252b; --text:#abb2bf; --bright:#d7dae0; --muted:#9199a8; --border:#181a1f; --selection:#2c313a; --hover:#323842; --blue:#61afef; --purple:#c678dd; --green:#98c379; --yellow:#e5c07b; --red:#e06c75; --mono:'JetBrains Mono','DejaVu Sans Mono',monospace; }
+    * { box-sizing:border-box; }
+    [hidden] { display:none !important; }
+    html, body { height:100%; margin:0; }
+    body { background:var(--editor); color:var(--text); font:13px/1.5 'Adwaita Sans','DejaVu Sans',sans-serif; }
+    button, select, input { font:inherit; color:inherit; }
+    button { border:0; background:none; cursor:pointer; }
+    button:hover { background:var(--hover); color:var(--bright); }
+    button:focus-visible, select:focus-visible, input:focus-visible { outline:2px solid var(--blue); outline-offset:-2px; }
+    ::selection { background:#3e4452; color:var(--bright); }
+    * { scrollbar-color:#4b5263 var(--editor); scrollbar-width:thin; }
+    svg { width:16px; height:16px; flex:none; fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; }
+    .symbols { position:absolute; width:0; height:0; overflow:hidden; }
+    .app { height:100dvh; min-height:420px; display:grid; grid-template:32px 1fr 26px / 232px minmax(0,1fr); }
+    .titlebar { grid-column:1/-1; display:flex; align-items:center; padding:0 13px; gap:9px; border-bottom:1px solid var(--border); background:var(--selection); }
+    .titlebar strong { font-size:12px; font-weight:500; }
+    .titlebar .center { position:absolute; left:50%; transform:translateX(-50%); color:var(--muted); font-size:12px; }
+    .mockup-label { margin-left:auto; color:var(--muted); font-size:11px; }
+    .sidebar { background:var(--sidebar); border-right:1px solid var(--border); display:flex; flex-direction:column; min-height:0; }
+    .workspace { height:53px; padding:0 15px; display:flex; align-items:center; gap:10px; }
+    .workspace svg { color:var(--purple); width:19px; height:19px; }
+    .workspace select { min-width:0; flex:1; background:transparent; border:none; color:var(--bright); font-weight:550; padding:7px 0; cursor:pointer; }
+    option { background:var(--sidebar); }
+    .search-trigger { margin:0 12px 17px; display:flex; align-items:center; gap:9px; border:1px solid #3e4452; border-radius:4px; padding:6px 8px; text-align:left; }
+    kbd { font:10px var(--mono); color:var(--muted); white-space:nowrap; }
+    .search-trigger kbd { margin-left:auto; }
+    .search-trigger span { white-space:nowrap; }
+    .section-label { font-size:11px; color:var(--muted); padding:0 17px 8px; }
+    .tree { padding:0 7px; }
+    .tree details summary { cursor:pointer; list-style:none; }
+    .tree details summary::-webkit-details-marker { display:none; }
+    .tree details summary svg:first-child { width:12px; }
+    .tree details:not([open]) summary svg:first-child { transform:rotate(-90deg); }
+    .row { display:flex; align-items:center; gap:8px; height:30px; padding:0 9px; white-space:nowrap; border-radius:3px; }
+    .row .filename { overflow:hidden; text-overflow:ellipsis; }
+    .row.child { padding-left:30px; }
+    .row.active { background:var(--selection); color:var(--bright); }
+    .row.active svg { color:var(--blue); }
+    .row.folder { color:var(--bright); }
+    .sidebar-tags { margin-top:30px; }
+    .tag-row { padding:5px 18px; display:flex; align-items:center; gap:10px; }
+    .tag-row svg { color:var(--purple); width:14px; }
+    .sidebar-bottom { margin-top:auto; padding:14px 17px; color:var(--muted); font-size:11px; }
+    .main { min-width:0; min-height:0; display:flex; flex-direction:column; }
+    .tabbar { height:37px; flex:none; display:flex; background:var(--sidebar); border-bottom:1px solid var(--border); }
+    .tab { display:flex; align-items:center; gap:9px; padding:0 16px; border-right:1px solid var(--border); font-size:12px; white-space:nowrap; }
+    .tab.active { background:var(--editor); color:var(--bright); box-shadow:inset 0 1px var(--blue); }
+    .tab.active .file { color:var(--blue); }
+    .tab .close { width:12px; color:var(--muted); margin-left:12px; }
+    .tab-actions { display:flex; align-items:center; margin-left:auto; padding:0 8px; gap:3px; }
+    .icon-button { width:29px; height:28px; border-radius:3px; display:grid; place-items:center; }
+    button[aria-pressed="true"] { background:#323a48; color:var(--blue); }
+    .document-bar { height:42px; flex:none; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:0 17px 0 23px; border-bottom:1px solid #303640; }
+    .breadcrumbs { display:flex; align-items:center; gap:9px; color:var(--muted); font-size:12px; min-width:0; }
+    .breadcrumbs span:last-child { color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .breadcrumbs svg { width:11px; height:11px; }
+    .view-controls { display:flex; align-items:center; gap:6px; flex:none; }
+    .view-button { height:28px; display:flex; align-items:center; gap:7px; padding:0 9px; border-radius:3px; font-size:12px; }
+    .formatting { display:flex; align-items:center; gap:4px; min-height:38px; border-bottom:1px solid #303640; padding:3px 23px; }
+    .formatting span { padding:2px 10px; min-width:31px; text-align:center; }
+    .formatting .divider { width:1px; min-width:1px; height:17px; padding:0; margin:0 7px; background:#3e4452; }
+    .panes { flex:1; min-height:0; display:flex; }
+    .pane { flex:1; min-width:0; overflow:auto; }
+    .document { padding:36px clamp(24px,4vw,62px) 50px; max-width:940px; margin:0; }
+    .note-title { font:600 27px/1.3 'Adwaita Sans','DejaVu Sans',sans-serif; color:var(--bright); margin:0 0 23px; letter-spacing:-.025em; }
+    .source { font:14px/1.95 var(--mono); overflow-wrap:anywhere; }
+    .source p { margin:0; min-height:1.95em; white-space:pre-wrap; unicode-bidi:plaintext; }
+    .source .heading { color:var(--red); }
+    .source .syntax { color:var(--purple); }
+    .source .tags { color:var(--yellow); }
+    .source .link { color:var(--blue); }
+    .source .code { color:var(--green); }
+    .source .cursor { display:inline-block; width:1px; height:1.15em; background:var(--blue); vertical-align:-3px; }
+    .preview { font:16px/1.8 'Adwaita Sans','DejaVu Sans',sans-serif; }
+    .preview p { margin:0 0 20px; unicode-bidi:plaintext; }
+    .preview .tags { color:var(--yellow); font:13px var(--mono); margin-bottom:28px; }
+    .preview h2 { color:var(--bright); font-size:21px; font-weight:550; margin:24px 0 12px; }
+    .preview a { color:var(--blue); text-underline-offset:3px; }
+    .preview blockquote { margin:20px 0; padding:0 16px; border-left:1px solid var(--muted); }
+    .preview code { font:14px var(--mono); color:var(--green); }
+    .reference-pane { border-left:1px solid var(--border); max-width:42%; }
+    .reference-pane .document { padding:30px 28px; }
+    .reference-label { display:flex; justify-content:space-between; padding:8px 15px; font-size:12px; color:var(--muted); border-bottom:1px solid #303640; }
+    .reference-pane h2 { font-size:21px; color:var(--bright); }
+    .reference-pane p { font-size:14px; }
+    .statusbar { grid-column:1/-1; display:flex; align-items:center; gap:17px; padding:0 12px; background:var(--sidebar); border-top:1px solid var(--border); font-size:11px; color:var(--muted); }
+    .statusbar .saved { display:flex; align-items:center; gap:5px; color:var(--green); }
+    .statusbar .saved svg { width:13px; }
+    .statusbar .spacer { flex:1; }
+    dialog { width:min(590px,90vw); margin:110px auto 0; border:1px solid #4b5263; border-radius:6px; padding:0; background:var(--editor); color:var(--text); }
+    dialog::backdrop { background:#0006; }
+    .search-field { display:flex; align-items:center; gap:12px; padding:15px; border-bottom:1px solid #3e4452; }
+    .search-field input { min-width:0; flex:1; border:0; padding:4px; background:transparent; color:var(--bright); outline-offset:3px; caret-color:var(--blue); }
+    input::placeholder { color:var(--muted); }
+    .search-results { padding:10px; }
+    .search-result { display:flex; align-items:center; gap:12px; padding:10px; border-radius:3px; }
+    .search-result:first-child { background:var(--selection); }
+    .search-result svg { color:var(--blue); }
+    .search-result small { display:block; color:var(--muted); font-size:11px; }
+    .search-footer { color:var(--muted); font-size:11px; padding:11px 17px; border-top:1px solid #3e4452; }
+    @media(max-width:900px) { .app { grid-template-columns:200px minmax(0,1fr); } .document { padding:28px; } .breadcrumbs .parent { display:none; } .titlebar .center { display:none; } .source { font-size:13px; } }
+    @media(max-width:600px) { .app { grid-template-columns:160px minmax(0,1fr); } .workspace { padding:0 9px; gap:5px; } .workspace select { font-size:12px; } .search-trigger kbd,.tab.inactive,.statusbar .optional { display:none; } .document { padding:22px 17px; } .document-bar { padding:0 10px; } .breadcrumbs { display:none; } .view-controls { margin-left:auto; } .reference-pane { max-width:50%; } }
+  </style>
+</head>
+<body>
+  <svg class="symbols" aria-hidden="true"><defs>
+    <symbol id="book" viewBox="0 0 24 24"><path d="M4 4h6a3 3 0 0 1 3 3v14a4 4 0 0 0-3-2H4zM13 7a3 3 0 0 1 3-3h5v15h-5a4 4 0 0 0-3 2"/></symbol>
+    <symbol id="file" viewBox="0 0 24 24"><path d="M14 3H5v18h14V8zM14 3v5h5M8 13h8M8 17h6"/></symbol>
+    <symbol id="folder" viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v12H3z"/></symbol>
+    <symbol id="search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></symbol>
+    <symbol id="down" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></symbol>
+    <symbol id="right" viewBox="0 0 24 24"><path d="m10 7 5 5-5 5"/></symbol>
+    <symbol id="close" viewBox="0 0 24 24"><path d="m7 7 10 10M7 17 17 7"/></symbol>
+    <symbol id="split" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="1"/><path d="M12 4v16"/></symbol>
+    <symbol id="eye" viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="hash" viewBox="0 0 24 24"><path d="m9 3-3 18M18 3l-3 18M3 9h18M2 15h18"/></symbol>
+    <symbol id="image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8" cy="8" r="1.5"/><path d="m3 18 6-6 4 4 3-3 5 5"/></symbol>
+  </defs></svg>
+  <div class="app">
+    <header class="titlebar"><svg aria-hidden="true"><use href="#book"/></svg><strong>Notes</strong><span class="center">Eigenvalues · Linear algebra</span><span class="mockup-label">UI mockup</span></header>
+    <aside class="sidebar" aria-label="Workspace files">
+      <div class="workspace"><svg aria-hidden="true"><use href="#book"/></svg><select aria-label="Workspace"><option>Linear algebra</option><option disabled>Other workspaces · mockup</option></select></div>
+      <button class="search-trigger" id="open-search"><svg aria-hidden="true"><use href="#search"/></svg><span>Search all notes</span><kbd>Ctrl P</kbd></button>
+      <div class="section-label">Files</div>
+      <nav class="tree" aria-label="Notes">
+        <details open><summary class="row folder"><svg aria-hidden="true"><use href="#down"/></svg><svg aria-hidden="true"><use href="#folder"/></svg>Lectures</summary>
+          <div class="row child"><svg aria-hidden="true"><use href="#file"/></svg><span class="filename">Vector spaces.md</span></div>
+          <div class="row child active" aria-current="page"><svg aria-hidden="true"><use href="#file"/></svg><span class="filename">Eigenvalues.md</span></div>
+          <div class="row child"><svg aria-hidden="true"><use href="#file"/></svg><span class="filename">Linear maps.md</span></div>
+        </details>
+        <details><summary class="row folder"><svg aria-hidden="true"><use href="#down"/></svg><svg aria-hidden="true"><use href="#folder"/></svg>Assignments</summary><div class="row child"><svg aria-hidden="true"><use href="#file"/></svg>Problem set 03.md</div></details>
+        <details><summary class="row folder"><svg aria-hidden="true"><use href="#down"/></svg><svg aria-hidden="true"><use href="#folder"/></svg>attachments</summary><div class="row child"><svg aria-hidden="true"><use href="#image"/></svg>diagram.png</div></details>
+        <div class="row"><svg aria-hidden="true"><use href="#file"/></svg><span class="filename">Practice problems.md</span></div>
+        <div class="row"><svg aria-hidden="true"><use href="#file"/></svg><span class="filename">Course overview.md</span></div>
+      </nav>
+      <div class="sidebar-tags"><div class="section-label">Tags</div><div class="tag-row"><svg aria-hidden="true"><use href="#hash"/></svg>exam</div><div class="tag-row"><svg aria-hidden="true"><use href="#hash"/></svg>lecture</div><div class="tag-row"><svg aria-hidden="true"><use href="#hash"/></svg><span lang="he" dir="rtl">לחזרה</span></div></div>
+      <div class="sidebar-bottom">~/Notes/Linear algebra</div>
+    </aside>
+    <main class="main">
+      <div class="tabbar"><div class="tab active"><svg class="file" aria-hidden="true"><use href="#file"/></svg>Eigenvalues.md<svg class="close" aria-hidden="true"><use href="#close"/></svg></div><div class="tab inactive"><svg aria-hidden="true"><use href="#file"/></svg>Practice problems.md</div><div class="tab-actions"><button class="icon-button" id="toggle-split" title="Toggle split pane" aria-label="Toggle split pane" aria-pressed="false"><svg aria-hidden="true"><use href="#split"/></svg></button></div></div>
+      <div class="document-bar"><div class="breadcrumbs"><span class="parent">Lectures</span><svg class="parent" aria-hidden="true"><use href="#right"/></svg><span>Eigenvalues.md</span></div><div class="view-controls"><button class="view-button" id="toggle-toolbar" aria-label="Toggle formatting toolbar" aria-expanded="false" aria-controls="formatting" title="Show formatting toolbar">Aa</button><button class="view-button" id="toggle-preview" aria-pressed="false"><svg aria-hidden="true"><use href="#eye"/></svg><span>Preview</span></button></div></div>
+      <div class="formatting" id="formatting" aria-label="Formatting toolbar mockup" hidden><span>H₁</span><span><b>B</b></span><span><i>I</i></span><span><s>S</s></span><span class="divider"></span><span>List</span><span>Task</span><span>Link</span><span>Code</span><span>Table</span><span>Math</span></div>
+      <div class="panes"><section class="pane" aria-label="Main note"><article class="document"><h1 class="note-title">Eigenvalues</h1>
+        <div class="source" id="source">
+          <p class="tags">#lecture #exam #לחזרה</p><p></p>
+          <p class="heading">## The idea</p><p>An eigenvector keeps its direction when a matrix acts on it.</p><p>The eigenvalue tells us how much it stretches or shrinks.</p><p></p>
+          <p lang="he" dir="auto">וקטור עצמי שומר על הכיוון שלו אחרי הפעלת המטריצה.</p><p lang="he" dir="auto">הערך העצמי λ מתאר את השינוי באורך של הווקטור.</p><p></p>
+          <p><span class="syntax">$$</span> Av = \lambda v <span class="syntax">$$</span></p><p></p>
+          <p class="heading">## Before the next lecture</p>
+          <p><span class="syntax">- [x]</span> Review <span class="link">[[Vector spaces]]</span></p>
+          <p><span class="syntax">- [ ]</span> Work through the diagonal matrix example</p>
+          <p><span class="syntax">- [ ]</span> Finish questions 3 and 4</p><p></p>
+          <p><span class="syntax">&gt;</span> Start with the geometry, then do the calculation.<span class="cursor"></span></p>
+        </div>
+        <div class="preview" id="preview" hidden><p class="tags">#lecture #exam #לחזרה</p><h2>The idea</h2><p>An eigenvector keeps its direction when a matrix acts on it.<br>The eigenvalue tells us how much it stretches or shrinks.</p><p lang="he" dir="auto">וקטור עצמי שומר על הכיוון שלו אחרי הפעלת המטריצה.<br>הערך העצמי λ מתאר את השינוי באורך של הווקטור.</p><p style="text-align:center;font:italic 23px Georgia,serif;color:var(--bright)">Av = λv</p><h2>Before the next lecture</h2><p><input type="checkbox" checked disabled aria-label="Review Vector spaces, complete"> Review <a href="#" class="demo-link">Vector spaces</a><br><input type="checkbox" disabled aria-label="Work through the diagonal matrix example"> Work through the diagonal matrix example<br><input type="checkbox" disabled aria-label="Finish questions 3 and 4"> Finish questions 3 and 4</p><blockquote>Start with the geometry, then do the calculation.</blockquote></div>
+      </article></section>
+      <section class="pane reference-pane" id="reference" aria-label="Second note" hidden><div class="reference-label"><span>Practice problems.md</span><span>Preview</span></div><article class="document preview"><h2>Practice problems</h2><p class="tags">#exam</p><p>Find the eigenvalues of a diagonal matrix.</p><p><code>A = diag(2, 3)</code></p><p>The diagonal entries are the eigenvalues:</p><p><code>λ₁ = 2 &nbsp; λ₂ = 3</code></p><h2>Try it yourself</h2><p>What changes when one of the diagonal entries is zero?</p><p lang="he" dir="auto">לפתור קודם בלי להסתכל על הפתרון.</p></article></section></div>
+    </main>
+    <footer class="statusbar"><span class="saved" title="Illustrative status. This mockup does not save files."><svg aria-hidden="true"><use href="#check"/></svg>Saved</span><span class="optional">Linear algebra</span><span class="spacer"></span><span>Markdown</span><span class="optional">UTF-8</span><span>Auto direction</span></footer>
+  </div>
+  <dialog id="search-dialog" aria-label="Search all workspaces"><div class="search-field"><svg aria-hidden="true"><use href="#search"/></svg><input id="search-input" placeholder="Search titles or #tags…" aria-label="Search note titles and tags" autocomplete="off"><button class="icon-button" id="close-search" aria-label="Close search"><svg aria-hidden="true"><use href="#close"/></svg></button></div><div class="search-results"><div class="search-result" data-match="eigenvalues lecture exam לחזרה"><svg aria-hidden="true"><use href="#file"/></svg><div>Eigenvalues<small>Linear algebra / Lectures · Current workspace</small></div></div><div class="search-result" data-match="practice problems exam"><svg aria-hidden="true"><use href="#file"/></svg><div>Practice problems<small>Linear algebra · Current workspace</small></div></div><div class="search-result" data-match="react notes study"><svg aria-hidden="true"><use href="#file"/></svg><div>React notes<small>Web development</small></div></div><div id="no-results" class="search-result" hidden>No matching sample notes.</div></div><div class="search-footer">All workspaces · Current workspace first · Sample results</div></dialog>
+  <script>
+    const byId = id => document.getElementById(id);
+    byId('toggle-toolbar').addEventListener('click', () => {
+      const open = byId('formatting').hidden;
+      byId('formatting').hidden = !open;
+      byId('toggle-toolbar').setAttribute('aria-expanded', String(open));
+      byId('toggle-toolbar').setAttribute('aria-pressed', String(open));
+    });
+    byId('toggle-preview').addEventListener('click', () => {
+      const open = byId('preview').hidden;
+      byId('preview').hidden = !open;
+      byId('source').hidden = open;
+      byId('toggle-preview').setAttribute('aria-pressed', String(open));
+      byId('toggle-preview').querySelector('span').textContent = open ? 'Markdown' : 'Preview';
+    });
+    byId('toggle-split').addEventListener('click', () => {
+      const open = byId('reference').hidden;
+      byId('reference').hidden = !open;
+      byId('toggle-split').setAttribute('aria-pressed', String(open));
+    });
+    const openSearch = () => { if (!byId('search-dialog').open) byId('search-dialog').showModal(); byId('search-input').focus(); };
+    byId('open-search').addEventListener('click', openSearch);
+    byId('close-search').addEventListener('click', () => byId('search-dialog').close());
+    document.addEventListener('keydown', event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'p') { event.preventDefault(); openSearch(); } });
+    byId('search-input').addEventListener('input', event => {
+      const query = event.target.value.toLowerCase().replaceAll('#','').trim();
+      let matches = 0;
+      document.querySelectorAll('[data-match]').forEach(row => {
+        let cursor = 0;
+        for (const character of row.dataset.match) if (character === query[cursor]) cursor++;
+        row.hidden = cursor !== query.length;
+        if (!row.hidden) matches++;
+      });
+      byId('no-results').hidden = matches !== 0;
+    });
+    document.querySelectorAll('.demo-link').forEach(link => link.addEventListener('click', event => event.preventDefault()));
+  </script>
+</body>
+</html>
