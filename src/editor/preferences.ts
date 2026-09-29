@@ -1,7 +1,7 @@
 import { EditorState, type Extension } from "@codemirror/state";
 import { EditorView, lineNumbers } from "@codemirror/view";
 import { indentUnit } from "@codemirror/language";
-import type { Preferences } from "../domain/preferences";
+import { editorFontFamily, type Preferences } from "../domain/preferences";
 
 export function selectEditorPreferences({
   preferences,
@@ -12,6 +12,9 @@ export function selectEditorPreferences({
     fontSize,
     lineHeight,
     editorFont,
+    customFont,
+    fontWeight,
+    letterSpacing,
     lineWrapping,
     lineNumbers,
     spellcheck,
@@ -21,6 +24,9 @@ export function selectEditorPreferences({
     fontSize,
     lineHeight,
     editorFont,
+    customFont,
+    fontWeight,
+    letterSpacing,
     lineWrapping,
     lineNumbers,
     spellcheck,
@@ -31,8 +37,7 @@ export function selectEditorPreferences({
 export function editorPreferenceExtensions(
   preferences: ReturnType<typeof selectEditorPreferences>,
 ): Extension {
-  const fontFamily =
-    preferences.editorFont === "mono" ? "var(--font-mono)" : "var(--font-ui)";
+  const fontFamily = editorFontFamily(preferences);
   return [
     preferences.lineWrapping ? EditorView.lineWrapping : [],
     preferences.lineNumbers ? lineNumbers() : [],
@@ -43,7 +48,11 @@ export function editorPreferenceExtensions(
     }),
     EditorView.theme({
       "&": { fontSize: `${preferences.fontSize}px` },
-      ".cm-content, .cm-scroller": { fontFamily },
+      ".cm-content, .cm-scroller": {
+        fontFamily,
+        fontWeight: String(preferences.fontWeight),
+        letterSpacing: `${preferences.letterSpacing}px`,
+      },
       ".cm-line": { lineHeight: String(preferences.lineHeight) },
       ".cm-gutters": {
         backgroundColor: "transparent",

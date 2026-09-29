@@ -1126,7 +1126,8 @@ fn old_settings_receive_complete_preference_defaults() {
             "lineNumbers":false,"spellcheck":false,"tabSize":2,"readableWidth":true,
             "defaultPreview":false,"autosaveDelayMs":600,"searchScope":"all",
             "currentWorkspaceFirst":true,"searchLimit":60,"restoreSession":true,
-            "refreshOnFocus":true,"sortFilesBy":"name"
+            "refreshOnFocus":true,"sortFilesBy":"name",
+            "customFont":"","fontWeight":400,"letterSpacing":0.0,"noteWidth":940
         })
     );
 }
@@ -1138,7 +1139,8 @@ fn preferences_persist_and_missing_fields_use_defaults() {
     let preferences: Preferences = serde_json::from_value(serde_json::json!({
         "fontSize":24,"lineHeight":2.2,"editorFont":"sans","tabSize":8,
         "autosaveDelayMs":5000,"searchScope":"current","searchLimit":200,
-        "sortFilesBy":"modified","refreshOnFocus":false
+        "sortFilesBy":"modified","refreshOnFocus":false,
+        "customFont":"Noto Sans Hebrew","fontWeight":500,"letterSpacing":0.3,"noteWidth":1200
     }))
     .unwrap();
     assert!(preferences.line_wrapping);
@@ -1161,6 +1163,9 @@ fn invalid_preferences_never_replace_saved_or_in_memory_values() {
     for (field, values) in [
         ("fontSize", vec![11.0_f64, 25.0, 15.5]),
         ("lineHeight", vec![1.29, 2.21]),
+        ("fontWeight", vec![299.0, 450.0, 701.0]),
+        ("letterSpacing", vec![3.1]),
+        ("noteWidth", vec![599.0, 1401.0]),
         ("tabSize", vec![0.0, 3.0, 9.0]),
         ("autosaveDelayMs", vec![199.0, 5001.0]),
         ("searchLimit", vec![19.0, 201.0]),
@@ -1189,6 +1194,22 @@ fn invalid_preferences_never_replace_saved_or_in_memory_values() {
         assert!(service
             .save_preferences(Preferences {
                 line_height,
+                ..Preferences::default()
+            })
+            .is_err());
+    }
+    for letter_spacing in [-0.6, f64::NAN, f64::INFINITY] {
+        assert!(service
+            .save_preferences(Preferences {
+                letter_spacing,
+                ..Preferences::default()
+            })
+            .is_err());
+    }
+    for custom_font in ["a".repeat(101), "Bad\nFont".to_string()] {
+        assert!(service
+            .save_preferences(Preferences {
+                custom_font,
                 ..Preferences::default()
             })
             .is_err());

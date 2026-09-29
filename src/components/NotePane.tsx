@@ -37,6 +37,7 @@ import {
   type Format,
 } from "../editor/CodeEditor";
 import { FormattingToolbar } from "./FormattingToolbar";
+import { editorFontFamily } from "../domain/preferences";
 
 const LivePreview = lazy(() =>
   import("../editor/LivePreview").then((module) => ({
@@ -74,7 +75,7 @@ function NoteView({
     document.getSnapshot,
   );
   const toolbar = useApp((state) => state.toolbarVisible);
-  const readableWidth = useApp((state) => state.preferences.readableWidth);
+  const preferences = useApp((state) => state.preferences);
   const [preview, setPreview] = useState(
     () => useApp.getState().preferences.defaultPreview,
   );
@@ -149,11 +150,25 @@ function NoteView({
       >
         <article
           className="document"
-          style={{ maxWidth: readableWidth ? 940 : "none" }}
+          style={{
+            maxWidth: preferences.readableWidth
+              ? preferences.noteWidth
+              : "none",
+            fontFamily: editorFontFamily(preferences),
+            fontSize: preferences.fontSize,
+            fontWeight: preferences.fontWeight,
+            letterSpacing: `${preferences.letterSpacing}px`,
+            lineHeight: preferences.lineHeight,
+          }}
         >
           <input
             ref={titleInput}
             className="note-title"
+            style={{
+              fontFamily: preferences.customFont
+                ? editorFontFamily(preferences)
+                : undefined,
+            }}
             aria-label="Note title"
             placeholder="Untitled"
             dir="auto"

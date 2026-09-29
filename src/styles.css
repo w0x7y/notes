@@ -678,8 +678,8 @@ button[aria-pressed="true"] {
   padding-left: 5px;
 }
 .live-preview {
-  font-size: 16px;
-  line-height: 1.85;
+  font-size: inherit;
+  line-height: inherit;
   overflow-wrap: anywhere;
 }
 .preview-block {

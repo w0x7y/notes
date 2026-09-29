@@ -245,7 +245,7 @@ export function AppearanceFields({
               className="appearance-reset"
               onClick={() => onColorChange(null)}
             >
-              Use default
+              Inherit / default
             </button>
           )}
         </div>

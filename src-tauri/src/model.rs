@@ -113,11 +113,15 @@ pub struct Preferences {
     pub font_size: u8,
     pub line_height: f64,
     pub editor_font: EditorFont,
+    pub custom_font: String,
+    pub font_weight: u16,
+    pub letter_spacing: f64,
     pub line_wrapping: bool,
     pub line_numbers: bool,
     pub spellcheck: bool,
     pub tab_size: u8,
     pub readable_width: bool,
+    pub note_width: u16,
     pub default_preview: bool,
     pub autosave_delay_ms: u16,
     pub search_scope: SearchScope,
@@ -134,11 +138,15 @@ impl Default for Preferences {
             font_size: 15,
             line_height: 1.9,
             editor_font: EditorFont::Mono,
+            custom_font: String::new(),
+            font_weight: 400,
+            letter_spacing: 0.0,
             line_wrapping: true,
             line_numbers: false,
             spellcheck: false,
             tab_size: 2,
             readable_width: true,
+            note_width: 940,
             default_preview: false,
             autosave_delay_ms: 600,
             search_scope: SearchScope::All,
@@ -153,6 +161,25 @@ impl Default for Preferences {
 
 impl Preferences {
     pub fn validate(&self) -> Result<(), String> {
+        if self.custom_font.encode_utf16().count() > 100
+            || self
+                .custom_font
+                .chars()
+                .any(|c| c <= '\u{001f}' || c == '\u{007f}')
+        {
+            return Err(
+                "Font name must be at most 100 characters without control characters".into(),
+            );
+        }
+        if !(300..=700).contains(&self.font_weight) || self.font_weight % 100 != 0 {
+            return Err("Font weight must be 300, 400, 500, 600, or 700".into());
+        }
+        if !self.letter_spacing.is_finite() || !(-0.5..=3.0).contains(&self.letter_spacing) {
+            return Err("Letter spacing must be between -0.5 and 3 pixels".into());
+        }
+        if !(600..=1400).contains(&self.note_width) {
+            return Err("Note width must be between 600 and 1400 pixels".into());
+        }
         if !(12..=24).contains(&self.font_size) {
             return Err("Font size must be between 12 and 24".into());
         }

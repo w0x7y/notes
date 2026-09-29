@@ -23,6 +23,7 @@ import { buildFileTree } from "../domain/file-tree";
 import { run, useApp } from "../domain/app-store";
 import { copyText } from "../platform";
 import { basename } from "../domain/notes";
+import { entryColor } from "../domain/appearance";
 
 export function WorkspaceIcon({
   icon,
@@ -85,7 +86,7 @@ function FolderNode({
             onClick={() => props.onOpen(entry.path)}
             onContextMenu={(event) => props.onContextMenu(event, entry)}
             title={entry.path}
-            style={{ color: props.appearances[entry.path]?.color ?? undefined }}
+            style={{ color: entryColor(entry.path, props.appearances) }}
             aria-current={props.active === entry.path ? "page" : undefined}
           >
             <ItemIcon
@@ -126,7 +127,7 @@ function FolderBranch(
           props.onFolder(props.path);
         }}
         aria-expanded={open}
-        style={{ color: props.appearances[props.path]?.color ?? undefined }}
+        style={{ color: entryColor(props.path, props.appearances) }}
         onContextMenu={(event) => props.onContextMenu(event, props.entry)}
       >
         <span className="chevron">

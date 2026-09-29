@@ -54,6 +54,10 @@ export function AppearanceDialog({
             }
           />
         </fieldset>
+        <p className="muted">
+          Without a custom color, files and folders inherit the nearest parent
+          folder’s color. Root items use the default text color.
+        </p>
         {error && (
           <p className="form-error" role="alert">
             {error}

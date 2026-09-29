@@ -1,5 +1,9 @@
 import { useState, type ReactNode } from "react";
-import { defaultPreferences, type Preferences } from "../domain/preferences";
+import {
+  defaultPreferences,
+  editorFontFamily,
+  type Preferences,
+} from "../domain/preferences";
 import { savePreferences, useApp } from "../domain/app-store";
 import { errorMessage } from "../domain/notes";
 import { Dialog } from "./Dialog";
@@ -195,6 +199,66 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                     onChange={(value) => update("editorFont", value)}
                   />
                 </Row>
+                <Row
+                  label="Custom font family"
+                  hint="Enter an installed font name, such as JetBrains Mono. Leave blank to use the font above. Missing fonts fall back automatically."
+                >
+                  <input
+                    className="setting-text"
+                    aria-label="Custom font family"
+                    placeholder="e.g. Noto Sans Hebrew"
+                    maxLength={100}
+                    spellCheck={false}
+                    value={draft.customFont}
+                    onChange={(event) =>
+                      update("customFont", event.target.value)
+                    }
+                  />
+                </Row>
+                <Row label="Font weight">
+                  <Choice
+                    label="Font weight"
+                    value={draft.fontWeight}
+                    options={[
+                      { value: 300, label: "Light" },
+                      { value: 400, label: "Regular" },
+                      { value: 500, label: "Medium" },
+                      { value: 600, label: "Semibold" },
+                      { value: 700, label: "Bold" },
+                    ]}
+                    onChange={(value) => update("fontWeight", value)}
+                  />
+                </Row>
+                <Row label="Letter spacing">
+                  <div className="setting-range">
+                    <input
+                      type="range"
+                      aria-label="Letter spacing"
+                      min={-0.5}
+                      max={3}
+                      step={0.1}
+                      value={draft.letterSpacing}
+                      onChange={(event) =>
+                        update("letterSpacing", Number(event.target.value))
+                      }
+                    />
+                    <output>{draft.letterSpacing.toFixed(1)}px</output>
+                  </div>
+                </Row>
+                <div
+                  className="settings-font-preview"
+                  aria-label="Font preview"
+                  style={{
+                    fontFamily: editorFontFamily(draft),
+                    fontSize: draft.fontSize,
+                    fontWeight: draft.fontWeight,
+                    letterSpacing: `${draft.letterSpacing}px`,
+                    lineHeight: draft.lineHeight,
+                  }}
+                >
+                  <p dir="auto">The next idea starts here. 0123456789</p>
+                  <p dir="auto">הרעיון הבא מתחיל כאן. English ועברית ביחד.</p>
+                </div>
                 <Row label="Tab size">
                   <Choice
                     label="Tab size"
@@ -220,6 +284,27 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                   "readableWidth",
                   "Limit line width",
                   "Keep notes at a comfortable reading width.",
+                )}
+                {draft.readableWidth && (
+                  <Row
+                    label="Note width"
+                    hint="Maximum width in both editing and preview modes."
+                  >
+                    <div className="setting-range">
+                      <input
+                        type="range"
+                        aria-label="Note width"
+                        min={600}
+                        max={1400}
+                        step={20}
+                        value={draft.noteWidth}
+                        onChange={(event) =>
+                          update("noteWidth", Number(event.target.value))
+                        }
+                      />
+                      <output>{draft.noteWidth}px</output>
+                    </div>
+                  </Row>
                 )}
                 {toggle(
                   "defaultPreview",

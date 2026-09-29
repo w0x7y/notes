@@ -31,6 +31,8 @@
   padding: 18px 22px;
   min-width: 0;
   min-height: 350px;
+  max-height: min(620px, 65vh);
+  overflow-y: auto;
 }
 .settings-content h3 {
   margin: 0 0 12px;
@@ -89,10 +91,31 @@
   accent-color: #61afef;
 }
 .setting-range output {
-  width: 35px;
+  width: 48px;
   text-align: right;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
+}
+.setting-text {
+  width: 190px;
+  min-width: 0;
+  flex-shrink: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--sidebar);
+  color: var(--bright);
+}
+.settings-font-preview {
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--sidebar);
+  overflow-wrap: anywhere;
+}
+.settings-font-preview p {
+  margin: 0;
 }
 .setting-row .menu-control {
   min-width: 130px;

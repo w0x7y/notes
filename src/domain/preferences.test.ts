@@ -1,5 +1,9 @@
 import { expect, it } from "vitest";
-import { defaultPreferences, preferencesSchema } from "./preferences";
+import {
+  defaultPreferences,
+  editorFontFamily,
+  preferencesSchema,
+} from "./preferences";
 import { settingsSchema } from "./contracts";
 it("supplies preferences for old settings and validates bounded values", () => {
   expect(
@@ -18,4 +22,42 @@ it("supplies preferences for old settings and validates bounded values", () => {
   expect(preferencesSchema.safeParse({ searchScope: "unknown" }).success).toBe(
     false,
   );
+});
+
+it("fills new typography defaults in older saved preferences", () => {
+  const preferences = preferencesSchema.parse({
+    editorFont: "sans",
+    fontSize: 18,
+  });
+  expect(preferences.customFont).toBe("");
+  expect(preferences.fontWeight).toBe(400);
+  expect(preferences.letterSpacing).toBe(0);
+  expect(preferences.noteWidth).toBe(940);
+  expect(editorFontFamily(preferences)).toBe("var(--font-ui)");
+});
+
+it("accepts installed font names and bounds typography values", () => {
+  const preferences = preferencesSchema.parse({
+    customFont: "  Noto Sans Hebrew  ",
+    fontWeight: 500,
+    letterSpacing: 0.3,
+    noteWidth: 1200,
+  });
+  expect(editorFontFamily(preferences)).toBe(
+    '"Noto Sans Hebrew", var(--font-mono)',
+  );
+  expect(
+    editorFontFamily({ ...preferences, customFont: 'A "quoted" font' }),
+  ).toBe('"A \\"quoted\\" font", var(--font-mono)');
+  for (const input of [
+    { customFont: "a".repeat(101) },
+    { customFont: "name\nother" },
+    { fontWeight: 450 },
+    { fontWeight: 800 },
+    { letterSpacing: -1 },
+    { letterSpacing: Infinity },
+    { noteWidth: 599 },
+    { noteWidth: 1401 },
+  ])
+    expect(preferencesSchema.safeParse(input).success).toBe(false);
 });

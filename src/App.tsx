@@ -42,6 +42,7 @@ const SettingsDialog = lazy(() =>
   })),
 );
 import { ItemIcon } from "./components/ItemIcon";
+import { entryColor } from "./domain/appearance";
 const NotePane = lazy(() =>
   import("./components/NotePane").then((module) => ({
     default: module.NotePane,
@@ -429,7 +430,7 @@ export default function App() {
               >
                 <button
                   className="tab-label"
-                  style={{ color: appearances[path]?.color ?? undefined }}
+                  style={{ color: entryColor(path, appearances) }}
                   role="tab"
                   aria-selected={focusedPath === path}
                   onClick={() => {

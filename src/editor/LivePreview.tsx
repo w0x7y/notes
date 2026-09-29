@@ -28,9 +28,6 @@ export const LivePreview = memo(function LivePreview({
   editorRef,
   onLink,
 }: Props) {
-  const fontSize = useApp((state) => state.preferences.fontSize);
-  const lineHeight = useApp((state) => state.preferences.lineHeight);
-  const editorFont = useApp((state) => state.preferences.editorFont);
   const [body, setBody] = useState(() => splitNote(document.content).body);
   const [active, setActive] = useState<number | null>(null);
   const host = useRef<HTMLDivElement>(null);
@@ -95,16 +92,7 @@ export const LivePreview = memo(function LivePreview({
     setActive(null);
   };
   return (
-    <div
-      className="live-preview"
-      ref={host}
-      style={{
-        fontSize,
-        lineHeight,
-        fontFamily:
-          editorFont === "mono" ? "var(--font-mono)" : "var(--font-ui)",
-      }}
-    >
+    <div className="live-preview" ref={host}>
       {blocks.map((block, index) =>
         active === index ? (
           <div className="preview-source" key={index}>
