@@ -1,4 +1,5 @@
-use crate::markdown::{first_h1, rewrite_links, LinkRewrite};
+use crate::incoming_links::rewrite_incoming;
+use crate::markdown::first_h1;
 use crate::model::{
     Appearance, DeleteResult, Entry, NoteFile, Preferences, RenameImageResult, Rewrite, SaveResult,
     Session, Settings, Snapshot, Stored, Workspace,
@@ -18,7 +19,7 @@ use walkdir::WalkDir;
 
 // Apply the same boundary to indexing and incoming-link rewrites. Explicitly
 // chosen workspace roots remain readable, even when their name is excluded.
-fn workspace_entry(entry: &walkdir::DirEntry) -> bool {
+pub(crate) fn workspace_entry(entry: &walkdir::DirEntry) -> bool {
     if entry.file_type().is_symlink() {
         return false;
     }
@@ -55,7 +56,7 @@ impl Trash for DesktopTrash {
     }
 }
 
-fn is_image(path: &Path) -> bool {
+pub(crate) fn is_image(path: &Path) -> bool {
     path.extension()
         .and_then(|s| s.to_str())
         .is_some_and(|ext| {
@@ -65,7 +66,7 @@ fn is_image(path: &Path) -> bool {
         })
 }
 
-fn is_note(path: &Path) -> bool {
+pub(crate) fn is_note(path: &Path) -> bool {
     path.extension()
         .and_then(|s| s.to_str())
         .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
@@ -120,7 +121,7 @@ fn remove_session_path(settings: &mut Settings, id: &str, path: &str) {
 fn err(context: &str, error: impl std::fmt::Display) -> String {
     format!("{context}: {error}")
 }
-fn revision(content: &str) -> String {
+pub(crate) fn revision(content: &str) -> String {
     hex::encode(Sha256::digest(content.as_bytes()))
 }
 fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
@@ -612,7 +613,8 @@ impl Service {
                     state.auto_names.insert(key(id, &new_path), true);
                     move_appearance(&mut state.settings, id, path, &new_path);
                     move_session_path(&mut state.settings, id, path, &new_path);
-                    let (links, issues) = self.rewrite_incoming(&state, &source, &target, id);
+                    let (links, issues) =
+                        self.rewrite_incoming(&state, &[(source.clone(), target.clone())], id);
                     rewritten = links;
                     warnings.extend(issues);
                     if let Err(error) = self.persist(&state) {
@@ -675,7 +677,7 @@ impl Service {
         }
         let (rewritten, mut warnings) = if target != source {
             self.move_file(&source, &target)?;
-            self.rewrite_incoming(&state, &source, &target, id)
+            self.rewrite_incoming(&state, &[(source.clone(), target.clone())], id)
         } else {
             (Vec::new(), Vec::new())
         };
@@ -756,7 +758,8 @@ impl Service {
         let new_path = normalized_relative(root, &target)?;
         move_appearance(&mut state.settings, id, path, &new_path);
         move_session_path(&mut state.settings, id, path, &new_path);
-        let (rewritten, mut warnings) = self.rewrite_incoming(&state, &source, &target, id);
+        let (rewritten, mut warnings) =
+            self.rewrite_incoming(&state, &[(source.clone(), target.clone())], id);
         if let Err(error) = self.persist(&state) {
             warnings.push(format!(
                 "Image renamed, but appearance settings were not saved: {error}"
@@ -874,15 +877,22 @@ impl Service {
         if fs::symlink_metadata(&target).is_ok() {
             return Err("An entry already exists at that path".into());
         }
-        let descendants: Vec<PathBuf> = WalkDir::new(&source)
+        let mappings = WalkDir::new(&source)
             .follow_links(false)
             .into_iter()
             .filter_map(Result::ok)
             .filter(|entry| {
                 entry.file_type().is_file() && (is_note(entry.path()) || is_image(entry.path()))
             })
-            .map(|entry| entry.path().to_path_buf())
-            .collect();
+            .map(|entry| {
+                let old = entry.path().to_path_buf();
+                let new = target.join(
+                    old.strip_prefix(&source)
+                        .map_err(|e| err("Cannot map moved file", e))?,
+                );
+                Ok((old, new))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
         fs::rename(&source, &target).map_err(|e| err("Cannot move folder", e))?;
         self.scan_cache.remove_root(root);
         let new_path = normalized_relative(root, &target)?;
@@ -924,17 +934,7 @@ impl Service {
                 )
             })
             .collect();
-        let mut rewritten = Vec::new();
-        let mut warnings = Vec::new();
-        for old in descendants {
-            let new = target.join(
-                old.strip_prefix(&source)
-                    .map_err(|e| err("Cannot map moved file", e))?,
-            );
-            let (links, issues) = self.rewrite_incoming(&state, &old, &new, id);
-            rewritten.extend(links);
-            warnings.extend(issues);
-        }
+        let (rewritten, mut warnings) = self.rewrite_incoming(&state, &mappings, id);
         if let Err(error) = self.persist(&state) {
             warnings.push(format!(
                 "Folder moved, but workspace settings were not saved: {error}"
@@ -981,141 +981,15 @@ impl Service {
     fn rewrite_incoming(
         &self,
         state: &Stored,
-        old: &Path,
-        new: &Path,
+        mappings: &[(PathBuf, PathBuf)],
         target_workspace_id: &str,
     ) -> (Vec<Rewrite>, Vec<String>) {
-        let mut notes = Vec::new();
-        let mut matching_targets = Vec::new();
-        let image = is_image(old);
-        let mut warnings = Vec::new();
-        for selected in &state.settings.workspaces {
-            if image && selected.id != target_workspace_id {
-                continue;
-            }
-            if Path::new(&selected.path).canonicalize().ok().as_deref()
-                != Some(Path::new(&selected.path))
-            {
-                warnings.push(format!(
-                    "Cannot scan links in workspace {}: folder moved or became a symlink",
-                    selected.name
-                ));
-                continue;
-            }
-            for found in WalkDir::new(&selected.path)
-                .follow_links(false)
-                .into_iter()
-                .filter_entry(workspace_entry)
-            {
-                match found {
-                    Ok(entry) if entry.file_type().is_file() => {
-                        if is_note(entry.path()) {
-                            notes.push((selected, entry.path().to_path_buf()));
-                        }
-                        if (image && is_image(entry.path())) || (!image && is_note(entry.path())) {
-                            matching_targets.push(entry.path().to_path_buf());
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-        let unique = matching_targets.iter().all(|p| {
-            p == new
-                || if image {
-                    p.file_name() != old.file_name()
-                } else {
-                    p.file_stem() != old.file_stem()
-                }
-        });
-        let new_ambiguous = matching_targets.iter().any(|p| {
-            p != new
-                && if image {
-                    p.file_name() == new.file_name()
-                } else {
-                    p.file_stem() == new.file_stem()
-                }
-        });
-        let Some(target_workspace) = state
-            .settings
-            .workspaces
-            .iter()
-            .find(|w| w.id == target_workspace_id)
-        else {
-            warnings.push("Cannot identify renamed note workspace for link updates".into());
-            return (Vec::new(), warnings);
-        };
-        let target_link = if image {
-            new.to_path_buf()
-        } else {
-            new.with_extension("")
-        };
-        let target_stem = match normalized_relative(Path::new(&target_workspace.path), &target_link)
-        {
-            Ok(stem) => stem,
-            Err(error) => {
-                warnings.push(error);
-                return (Vec::new(), warnings);
-            }
-        };
-        let mut rewritten = Vec::new();
-        for (selected, note_path) in notes {
-            if note_path == new {
-                continue;
-            }
-            let root = Path::new(&selected.path);
-            let Ok(path) = normalized_relative(root, &note_path) else {
-                continue;
-            };
-            let content = match fs::read_to_string(&note_path) {
-                Ok(c) => c,
-                Err(e) => {
-                    warnings.push(format!("Cannot read links in {path}: {e}"));
-                    continue;
-                }
-            };
-            let qualified = if selected.id == target_workspace_id {
-                format!("/{target_stem}")
-            } else {
-                format!("{target_workspace_id}:{target_stem}")
-            };
-            let bare = if new_ambiguous {
-                qualified.as_str()
-            } else if image {
-                new.file_name().unwrap_or_default().to_str().unwrap_or("")
-            } else {
-                new.file_stem().unwrap_or_default().to_str().unwrap_or("")
-            };
-            let changed = rewrite_links(
-                &content,
-                &LinkRewrite {
-                    source: &note_path,
-                    source_root: root,
-                    old,
-                    new,
-                    target_root: Path::new(&target_workspace.path),
-                    target_workspace_id,
-                    unique_basename: unique,
-                    bare_destination: bare,
-                    qualified_destination: &qualified,
-                    image,
-                },
-            );
-            if changed == content {
-                continue;
-            }
-            if let Err(e) = self.write_note_file(&note_path, changed.as_bytes()) {
-                warnings.push(format!("Cannot update links in {path}: {e}"));
-                continue;
-            }
-            rewritten.push(Rewrite {
-                workspace_id: selected.id.clone(),
-                path,
-                revision: revision(&changed),
-                content: changed,
-            });
-        }
-        (rewritten, warnings)
+        rewrite_incoming(
+            &state.settings.workspaces,
+            target_workspace_id,
+            mappings,
+            |path, bytes| self.write_note_file(path, bytes),
+        )
     }
 }
 fn move_without_overwrite(source: &Path, target: &Path) -> Result<(), String> {

@@ -32,3 +32,17 @@ Search normalizes titles and tags once per index, ranks only the requested numbe
 Other changes reduce work without timing claims: closed saved note buffers are released; concurrent focus refreshes share one request; unchanged scan results preserve the index reference; the active workspace loads before background scans; editor preferences reconfigure the existing CodeMirror instance and preserve its cursor and undo stack. Cache locks cover only map operations, so filesystem I/O and Markdown parsing cannot block saves while holding that lock.
 
 Regression checks cover ranking limits, same-size external edits with restored timestamps, deleted/renamed files, failed settings persistence, save conflicts, editor undo, Markdown block ranges, and a deliberately blocked scan alongside a save and a scan of another workspace. See the editor and native reports for details.
+
+## Architecture sanity check
+
+A separate `node scripts/performance.mjs` run on 2026-09-29, after the architecture refactor, measured the following. These are fresh local measurements, not a before/after comparison for relocation or content analysis.
+
+| Workload | Median | p95 |
+| --- | ---: | ---: |
+| Title/tag search, 500 notes | 0.051 ms | 0.093 ms |
+| Title/tag search, 5,000 notes | 0.304 ms | 0.420 ms |
+| Prepare tree, 500 notes | 0.133 ms | 0.167 ms |
+| Prepare tree, 5,000 notes | 1.654 ms | 2.314 ms |
+| Split a 1 MB note | 0.033 ms | 0.035 ms |
+
+The content-analysis scheduler now limits reads globally across overlapping consumers. Deterministic timer-order tests verify that bulk analysis yields for both uncached and changed live buffers, while a scoped outline updates immediately. Native incoming-link discovery runs once per relocation and writes each changed referring note once. These are structural guarantees and regression results; native relocation speed and end-to-end typing latency have not been benchmarked for this refactor.

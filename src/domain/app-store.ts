@@ -1,4 +1,4 @@
-import { remapFavorite, forgetFavorites } from "../knowledge/library";
+import { forgetFavorites } from "../knowledge/library";
 import {
   defaultPreferences,
   preferencesSchema,
@@ -15,7 +15,8 @@ import type {
   Workspace,
 } from "./contracts";
 import { NoteDocument } from "./document";
-import { errorMessage, extractTags, noteTitle } from "./notes";
+import { errorMessage } from "./notes";
+import { Relocations } from "./relocation";
 import { files } from "../platform";
 
 export const emptySession = (): Session => ({
@@ -24,7 +25,8 @@ export const emptySession = (): Session => ({
   secondary: null,
   split: false,
 });
-type AppState = Settings & {
+export type AppState = Settings & {
+  selectedFolder: string;
   navigation: {
     workspaceId: string;
     path: string;
@@ -45,6 +47,7 @@ export const useApp = create<AppState>(() => ({
   appearances: {},
   toolbarVisible: false,
   navigation: null,
+  selectedFolder: "",
   ready: false,
   entries: {},
   notice: null,
@@ -56,6 +59,17 @@ const loading = new Map<string, Promise<NoteDocument>>();
 let persistTimer: ReturnType<typeof setTimeout> | undefined;
 let persisting: Promise<void> = Promise.resolve();
 const key = (id: string, path: string) => `${id}\0${path}`;
+const relocations = new Relocations({
+  setState: (update) => useApp.setState(update),
+  documents,
+  loading,
+  files,
+  persist: persistNow,
+  persistSoon,
+  refresh,
+  report: (error) => showError(error),
+  register: registerDocument,
+});
 export const showError = (error: unknown) =>
   useApp.setState({ notice: errorMessage(error) });
 export const run = (operation: Promise<unknown>) => {
@@ -215,24 +229,13 @@ function removeTab(id: string, currentPath: string): void {
   });
 }
 
-function remapAppearance(id: string, previousPath: string, path: string): void {
-  remapFavorite(id, previousPath, path);
-  useApp.setState((state) => {
-    const entries = { ...state.appearances[id] };
-    const appearance = entries[previousPath];
-    if (!appearance) return state;
-    delete entries[previousPath];
-    entries[path] = appearance;
-    return { appearances: { ...state.appearances, [id]: entries } };
-  });
-}
-
 export async function setEntryAppearance(
   id: string,
   path: string,
   appearance: Appearance,
   note?: NoteDocument,
 ): Promise<void> {
+  path = await relocations.afterMoves(id, path);
   const document =
     note ?? documents.get(key(id, path)) ?? (await loading.get(key(id, path)));
   await document?.flush();
@@ -246,39 +249,7 @@ export async function setEntryAppearance(
   }));
 }
 
-export async function renameImage(
-  id: string,
-  path: string,
-  name: string,
-): Promise<void> {
-  // Incoming image links can live in any open workspace. Save pending edits
-  // before the backend rewrites them so their revisions stay in sync.
-  await flushAll();
-  const result = await files.renameImage(id, path, name);
-  remapAppearance(id, path, result.path);
-  changeSession(id, (session) => ({
-    ...session,
-    tabs: session.tabs.map((tab) => (tab === path ? result.path : tab)),
-    primary: session.primary === path ? result.path : session.primary,
-    secondary: session.secondary === path ? result.path : session.secondary,
-  }));
-  useApp.setState((state) => ({
-    entries: {
-      ...state.entries,
-      [id]: (state.entries[id] ?? []).map((entry) =>
-        entry.path === path
-          ? {
-              ...entry,
-              path: result.path,
-              title: result.path.split("/").at(-1) ?? result.path,
-            }
-          : entry,
-      ),
-    },
-  }));
-  applyRewrites(result.rewritten);
-  if (result.warnings.length) showError(result.warnings.join("\n"));
-}
+export const renameImage = relocations.renameImage.bind(relocations);
 
 export async function deleteEntry(
   id: string,
@@ -286,6 +257,7 @@ export async function deleteEntry(
   kind: "note" | "image",
   note?: NoteDocument,
 ): Promise<void> {
+  path = await relocations.afterMoves(id, path);
   const document =
     kind === "note" ? (note ?? (await loadDocument(id, path))) : undefined;
   await document?.flush();
@@ -317,6 +289,7 @@ export async function deleteEntry(
 }
 
 export async function removeWorkspace(id: string): Promise<void> {
+  await relocations.whenIdle();
   await Promise.allSettled(
     [...loading.entries()]
       .filter(([entryKey]) => entryKey.startsWith(id + "\0"))
@@ -345,36 +318,7 @@ function saved(
   previousPath: string,
   result: SaveResult,
 ): void {
-  const id = document.workspaceId;
-  if (previousPath !== result.path) {
-    remapAppearance(id, previousPath, result.path);
-    documents.delete(key(id, previousPath));
-    documents.set(key(id, result.path), document);
-    changeSession(id, (session) => ({
-      ...session,
-      tabs: session.tabs.map((path) =>
-        path === previousPath ? result.path : path,
-      ),
-      primary: session.primary === previousPath ? result.path : session.primary,
-      secondary:
-        session.secondary === previousPath ? result.path : session.secondary,
-    }));
-  }
-  useApp.setState((state) => {
-    const entries = (state.entries[id] ?? []).filter(
-      (entry) => entry.path !== previousPath && entry.path !== result.path,
-    );
-    entries.push({
-      path: result.path,
-      kind: "note",
-      title: noteTitle(result.path, result.content),
-      tags: extractTags(result.content),
-      modified: Date.now(),
-    });
-    return { entries: { ...state.entries, [id]: entries } };
-  });
-  applyRewrites(result.rewritten);
-  if (result.warnings.length) showError(result.warnings.join("\n"));
+  relocations.saved(document, previousPath, result);
 }
 
 function registerDocument(
@@ -400,6 +344,9 @@ export async function loadDocument(
   if (cached) return cached;
   const pending = loading.get(key(id, path));
   if (pending) return pending;
+  path = await relocations.afterMoves(id, path);
+  const existing = documents.get(key(id, path)) ?? loading.get(key(id, path));
+  if (existing) return existing;
   const request = files
     .readNote(id, path)
     .then((note) => registerDocument(id, note))
@@ -409,20 +356,11 @@ export async function loadDocument(
 }
 
 export async function newNote(id: string, folder = ""): Promise<void> {
-  const note = await files.createNote(id, folder);
-  const document = registerDocument(id, note);
-  saved(document, note.path, { ...note, rewritten: [], warnings: [] });
-  openFile(id, note.path);
+  const document = await relocations.createNote(id, folder);
+  openFile(id, document.getSnapshot().path);
 }
 
-export async function renameNote(
-  document: NoteDocument,
-  name: string,
-): Promise<void> {
-  await document.rename((note) =>
-    files.renameNote(document.workspaceId, note, name),
-  );
-}
+export const renameNote = relocations.renameNote.bind(relocations);
 
 export async function moveEntry(
   id: string,
@@ -437,7 +375,6 @@ export async function moveEntry(
   if (kind === "folder" && (folder === path || folder.startsWith(path + "/")))
     throw new Error("Cannot move a folder into itself.");
   if (kind === "note") {
-    await flushAll();
     const document = await loadDocument(id, path);
     await renameNote(document, destination);
   } else if (kind === "image") {
@@ -447,68 +384,11 @@ export async function moveEntry(
   }
 }
 
-export async function moveFolder(
-  id: string,
-  path: string,
-  destination: string,
-): Promise<void> {
-  await flushAll();
-  const result = await files.moveFolder(id, path, destination);
-  if (result.path === path) return;
-  const map = (value: string) =>
-    value === path || value.startsWith(path + "/")
-      ? result.path + value.slice(path.length)
-      : value;
-  for (const entry of useApp.getState().entries[id] ?? []) {
-    const updated = map(entry.path);
-    if (updated !== entry.path) remapFavorite(id, entry.path, updated);
-  }
-  for (const [oldKey, document] of [...documents]) {
-    if (document.workspaceId !== id) continue;
-    const oldPath = document.getSnapshot().path;
-    const newPath = map(oldPath);
-    if (newPath === oldPath) continue;
-    const note = await files.readNote(id, newPath);
-    documents.delete(oldKey);
-    document.relocate(note);
-    documents.set(key(id, newPath), document);
-  }
-  useApp.setState((state) => {
-    const appearances: (typeof state.appearances)[string] = {};
-    for (const [oldPath, value] of Object.entries(state.appearances[id] ?? {}))
-      appearances[map(oldPath)] = value;
-    return {
-      entries: {
-        ...state.entries,
-        [id]: (state.entries[id] ?? []).map((entry) => ({
-          ...entry,
-          path: map(entry.path),
-        })),
-      },
-      appearances: { ...state.appearances, [id]: appearances },
-    };
-  });
-  changeSession(id, (session) => ({
-    ...session,
-    tabs: session.tabs.map(map),
-    primary: session.primary ? map(session.primary) : null,
-    secondary: session.secondary ? map(session.secondary) : null,
-  }));
-  applyRewrites(
-    result.rewritten.filter(
-      (rewrite) =>
-        rewrite.workspaceId !== id ||
-        !rewrite.path.startsWith(result.path + "/"),
-    ),
-  );
-  await refreshWorkspace(id);
-  if (result.warnings.length) showError(result.warnings.join("\n"));
-}
+export const moveFolder = relocations.moveFolder.bind(relocations);
 
 export async function saveCopy(document: NoteDocument): Promise<void> {
   const content = document.content;
-  const note = await files.createNote(document.workspaceId, "");
-  const copy = registerDocument(document.workspaceId, note);
+  const copy = await relocations.createNote(document.workspaceId, "");
   copy.edit(content);
   await copy.flush();
   // Once the recovery copy is durable, retire the failed buffer so it no
@@ -552,7 +432,9 @@ function sameEntries(a: Entry[], b: Entry[]): boolean {
   );
 }
 async function refresh(id: string): Promise<void> {
+  const version = relocations.version;
   const snapshot = await files.scanWorkspace(id);
+  if (version !== relocations.version) return;
   if (!useApp.getState().workspaces.some((workspace) => workspace.id === id))
     return;
   const openDocuments = [...documents.values()].filter(
@@ -562,13 +444,17 @@ async function refresh(id: string): Promise<void> {
     openDocuments.map(async (document) => {
       try {
         const current = await files.readNote(id, document.getSnapshot().path);
+        if (version !== relocations.version) return;
         document.receiveExternal(current.content, current.revision);
       } catch {
         /* A removed open note remains available in memory. */
       }
     }),
   );
-  if (!sameEntries(useApp.getState().entries[id] ?? [], snapshot.entries)) {
+  if (
+    version === relocations.version &&
+    !sameEntries(useApp.getState().entries[id] ?? [], snapshot.entries)
+  ) {
     useApp.setState((state) => ({
       entries: { ...state.entries, [id]: snapshot.entries },
     }));
@@ -596,10 +482,22 @@ export async function updateWorkspace(workspace: Workspace): Promise<void> {
   }));
 }
 export async function flushAll(): Promise<void> {
-  await Promise.all(
-    [...documents.values()].map((document) => document.flush()),
+  // Closing must include accepted relocations and creations, including anything
+  // queued while this pass is saving. Only finish once the registry is stable.
+  let version: number;
+  do {
+    await relocations.whenIdle();
+    await Promise.all([...loading.values()]);
+    version = relocations.version;
+    await Promise.all(
+      [...documents.values()].map((document) => document.flush()),
+    );
+    await persistNow();
+    await relocations.whenIdle();
+  } while (
+    version !== relocations.version ||
+    [...documents.values()].some((document) => document.dirty)
   );
-  await persistNow();
 }
 export function hasUnsavedChanges(): boolean {
   return [...documents.values()].some((document) => document.dirty);
@@ -643,9 +541,7 @@ export async function createContentNote(
   fixedPath?: string,
   open = true,
 ): Promise<NoteDocument> {
-  const note = await files.createNote(id, folder);
-  const document = registerDocument(id, note);
-  saved(document, note.path, { ...note, rewritten: [], warnings: [] });
+  const document = await relocations.createNote(id, folder);
   // Keep a failed generated note reachable; never discard its unsaved buffer.
   try {
     if (fixedPath) await renameNote(document, fixedPath);
@@ -668,30 +564,4 @@ export async function registerCaptureWorkspace(): Promise<string> {
     entries: { ...state.entries, [snapshot.workspace.id]: snapshot.entries },
   }));
   return snapshot.workspace.id;
-}
-
-function applyRewrites(rewrites: SaveResult["rewritten"]): void {
-  if (!rewrites.length) return;
-  for (const rewrite of rewrites) {
-    documents
-      .get(key(rewrite.workspaceId, rewrite.path))
-      ?.receiveExternal(rewrite.content, rewrite.revision);
-  }
-  useApp.setState((state) => {
-    const entries = { ...state.entries };
-    for (const rewrite of rewrites) {
-      entries[rewrite.workspaceId] = (entries[rewrite.workspaceId] ?? []).map(
-        (entry) =>
-          entry.path === rewrite.path
-            ? {
-                ...entry,
-                title: noteTitle(rewrite.path, rewrite.content),
-                tags: extractTags(rewrite.content),
-                modified: Math.max(Date.now(), entry.modified + 1),
-              }
-            : entry,
-      );
-    }
-    return { entries };
-  });
 }
