@@ -1,24 +1,19 @@
-.workspace-tools {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 2px 10px 10px;
-  border-bottom: 1px solid var(--border, #303640);
+.workspace-tools-menu {
+  flex: none;
 }
-.workspace-tools button {
-  display: grid;
-  place-items: center;
-  flex: 1;
+.workspace-tools-menu .menu-trigger {
+  width: 26px;
   height: 28px;
-  border-radius: 4px;
-  color: var(--muted, #9da5b4);
+  padding: 0;
+  justify-content: center;
+  color: var(--muted);
 }
-.workspace-tools button:hover {
-  background: #2c313a;
-  color: #61afef;
+.workspace-tools-menu .menu-trigger > svg {
+  display: none;
 }
-.workspace-tools button:disabled {
-  opacity: 0.4;
+.workspace-tools-menu .menu-trigger[aria-expanded="true"] {
+  background: var(--hover);
+  color: var(--bright);
 }
 .favorite-notes {
   padding: 8px 10px;

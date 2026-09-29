@@ -7,7 +7,10 @@ import {
   CalendarDays,
   Star,
   FilePlus2,
+  Ellipsis,
+  Settings2,
 } from "lucide-react";
+import { MenuButton } from "../components/PopupMenu";
 import { openFile, useApp } from "../domain/app-store";
 import { useLibrary, toggleFavorite } from "./library";
 import "./knowledge.css";
@@ -21,9 +24,88 @@ export type WorkspaceTool =
   | "templates";
 export function WorkspaceTools({
   onTool,
+  onSettings,
 }: {
   onTool: (tool: WorkspaceTool) => void;
+  onSettings?: () => void;
 }) {
+  const workspaceId = useApp((state) => state.activeWorkspaceId);
+  return (
+    <MenuButton
+      label="Workspace tools"
+      className="workspace-tools-menu"
+      actions={[
+        {
+          id: "commands",
+          label: "Commands",
+          shortcut: "Ctrl K",
+          icon: <Command size={15} />,
+          onSelect: () => onTool("commands"),
+        },
+        {
+          id: "contents",
+          label: "Search contents",
+          shortcut: "Ctrl Shift P",
+          icon: <Search size={15} />,
+          onSelect: () => onTool("contents"),
+        },
+        {
+          id: "capture",
+          label: "Quick capture",
+          shortcut: "Ctrl Shift N",
+          separatorBefore: true,
+          icon: <Inbox size={15} />,
+          onSelect: () => onTool("capture"),
+        },
+        {
+          id: "daily",
+          label: "Today's note",
+          shortcut: "Ctrl Shift D",
+          icon: <CalendarDays size={15} />,
+          onSelect: () => onTool("daily"),
+        },
+        ...(workspaceId
+          ? [
+              {
+                id: "templates",
+                label: "New from template…",
+                icon: <FilePlus2 size={15} />,
+                onSelect: () => onTool("templates"),
+              },
+              {
+                id: "tasks",
+                label: "Workspace tasks",
+                separatorBefore: true,
+                icon: <ListTodo size={15} />,
+                onSelect: () => onTool("tasks"),
+              },
+              {
+                id: "projects",
+                label: "Projects and assignments",
+                icon: <Columns3 size={15} />,
+                onSelect: () => onTool("projects"),
+              },
+            ]
+          : []),
+        ...(onSettings
+          ? [
+              {
+                id: "settings",
+                label: "Workspace settings…",
+                separatorBefore: true,
+                icon: <Settings2 size={15} />,
+                onSelect: onSettings,
+              },
+            ]
+          : []),
+      ]}
+    >
+      <Ellipsis size={17} />
+    </MenuButton>
+  );
+}
+
+export function PinnedNotes() {
   const favorites = useLibrary((s) => s.favorites),
     error = useLibrary((s) => s.error),
     entries = useApp((s) => s.entries),
@@ -31,60 +113,6 @@ export function WorkspaceTools({
   const pins = favorites.filter((f) => f.workspaceId === id);
   return (
     <>
-      <div className="workspace-tools" aria-label="Workspace tools">
-        <button
-          title="Search contents (Ctrl+Shift+P)"
-          aria-label="Search contents"
-          onClick={() => onTool("contents")}
-        >
-          <Search size={15} />
-        </button>
-        <button
-          title="Commands (Ctrl+K)"
-          aria-label="Commands"
-          onClick={() => onTool("commands")}
-        >
-          <Command size={15} />
-        </button>
-        <button
-          title="Quick capture (Ctrl+Shift+N)"
-          aria-label="Quick capture"
-          onClick={() => onTool("capture")}
-        >
-          <Inbox size={15} />
-        </button>
-        <button
-          title="Open today's note (Ctrl+Shift+D)"
-          aria-label="Open today's note"
-          onClick={() => onTool("daily")}
-        >
-          <CalendarDays size={15} />
-        </button>
-        <button
-          title="New from template"
-          aria-label="New from template"
-          disabled={!id}
-          onClick={() => onTool("templates")}
-        >
-          <FilePlus2 size={15} />
-        </button>
-        <button
-          title="Workspace tasks"
-          aria-label="Workspace tasks"
-          disabled={!id}
-          onClick={() => onTool("tasks")}
-        >
-          <ListTodo size={15} />
-        </button>
-        <button
-          title="Projects and assignments"
-          aria-label="Projects and assignments"
-          disabled={!id}
-          onClick={() => onTool("projects")}
-        >
-          <Columns3 size={15} />
-        </button>
-      </div>
       {!!pins.length && (
         <div className="favorite-notes">
           <div className="section-name">Pinned</div>

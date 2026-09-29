@@ -1038,3 +1038,20 @@ button[aria-pressed="true"] {
   color: var(--muted);
   font-size: 10px;
 }
+
+.menu-separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
+}
+.menu-shortcut {
+  flex: none;
+  margin-left: auto;
+  padding-left: 12px;
+  color: var(--muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.menu-item > svg {
+  flex: none;
+}

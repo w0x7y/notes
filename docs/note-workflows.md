@@ -2,7 +2,7 @@
 
 Ctrl+P searches note titles and inline tags. Ctrl+Shift+P searches note contents across registered workspaces and shows matching snippets. Workspace, folder and inline-tag filters combine; current-workspace matches appear first. Save a named search using the star beside its name field. Queries currently match all entered words as case-insensitive substrings; there is no regex/query language. Results show one snippet per matching note, capped at 150 notes.
 
-Ctrl+K opens the command palette. It includes search, capture, daily notes, lecture/template creation, tasks, assignments/projects, settings, refresh, save, and pane actions.
+The ellipsis beside the workspace name opens Tools, with named actions, shortcuts and workspace settings. Ctrl+K opens the command palette. It includes search, capture, daily notes, lecture/template creation, tasks, assignments/projects, settings, refresh, save, and pane actions.
 
 Ctrl+Shift+N creates a blank note in Inbox/ inside the dedicated Quick Notes workspace. Ctrl+Shift+D opens Daily/YYYY-MM-DD.md in that same workspace, using the local calendar date. The native app creates Documents/Quick Notes on first use, using the OS Documents location. Repeating the daily command reopens the existing file without replacing its content. Removing Quick Notes unregisters it like any workspace; invoking capture/daily again registers the existing directory.
 
@@ -20,11 +20,11 @@ Type / at the start of a line for Markdown insertions: headings, checklist, list
 
 ## Tasks and projects
 
-The sidebar task button opens a workspace list of actual Markdown checkboxes. Filter open/completed/all tasks or text. Checkbox changes update the source note through its normal save queue. Clicking a task opens its source line. Code examples and Templates/ are excluded.
+Tools → Workspace tasks opens a workspace list of actual Markdown checkboxes. Filter open/completed/all tasks or text. Checkbox changes update the source note through its normal save queue. Clicking a task opens its source line. Code examples and Templates/ are excluded.
 
 Add status, due, subject and priority in note details, or start with an Assignment/Project template. These properties are YAML frontmatter. Editing them preserves unrelated fields and comments. Enter or leaving a field saves it; clearing it removes it. Malformed YAML is rejected without replacing it. Fix malformed frontmatter in an external text editor if needed; the note editor keeps the metadata separate from its body.
 
-The project button shows a filtered table or board. Both views edit the original notes. Change a card's status field to move it between columns; the board does not use drag-and-drop. Default columns are Todo, In progress and Done; existing custom statuses get their own columns. Notes with none of the four properties and template source files are excluded.
+Tools → Projects and assignments shows a filtered table or board. Both views edit the original notes. Change a card's status field to move it between columns; the board does not use drag-and-drop. Default columns are Todo, In progress and Done; existing custom statuses get their own columns. Notes with none of the four properties and template source files are excluded.
 
 ## Performance and limits
 

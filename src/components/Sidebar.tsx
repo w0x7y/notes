@@ -1,5 +1,6 @@
 import {
   WorkspaceTools,
+  PinnedNotes,
   type WorkspaceTool,
 } from "../knowledge/WorkspaceTools";
 import { useMemo, useState, type MouseEvent } from "react";
@@ -17,7 +18,6 @@ import {
   Palette,
   Trash2,
   Search,
-  Settings2,
   Settings,
 } from "lucide-react";
 import { ItemIcon } from "./ItemIcon";
@@ -202,15 +202,10 @@ export function Sidebar(props: Props) {
             {props.workspace?.name ?? "Choose a workspace"}
           </span>
         </MenuButton>
-        {props.workspace && (
-          <button
-            className="icon-button small"
-            aria-label="Workspace settings"
-            onClick={props.onSettings}
-          >
-            <Settings2 size={14} />
-          </button>
-        )}
+        <WorkspaceTools
+          onTool={props.onTool}
+          onSettings={props.workspace ? props.onSettings : undefined}
+        />
       </div>
       <button className="sidebar-search" onClick={() => props.onSearch()}>
         <Search size={15} />
@@ -221,7 +216,7 @@ export function Sidebar(props: Props) {
         </span>
         <kbd>Ctrl P</kbd>
       </button>
-      <WorkspaceTools onTool={props.onTool} />
+      <PinnedNotes />
       <div className="sidebar-section">
         <button
           className={`section-name ${!props.selectedFolder ? "selected-root" : ""}`}

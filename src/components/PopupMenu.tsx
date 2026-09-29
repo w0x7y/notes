@@ -1,9 +1,17 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import {
+  Fragment,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { Check, ChevronDown } from "lucide-react";
 
 export type MenuAction = {
   id: string;
   label: string;
+  shortcut?: string;
+  separatorBefore?: boolean;
   color?: string;
   icon?: ReactNode;
   selected?: boolean;
@@ -104,21 +112,28 @@ export function PopupMenu({
       }}
     >
       {actions.map((action) => (
-        <button
-          key={action.id}
-          type="button"
-          className={`menu-item ${action.danger ? "danger" : ""}`}
-          role={action.selected === undefined ? "menuitem" : "menuitemradio"}
-          aria-checked={action.selected}
-          onClick={() => {
-            dismiss(true);
-            action.onSelect();
-          }}
-        >
-          {action.icon}
-          <span style={{ color: action.color }}>{action.label}</span>
-          {action.selected && <Check size={13} className="menu-check" />}
-        </button>
+        <Fragment key={action.id}>
+          {action.separatorBefore && (
+            <div className="menu-separator" role="separator" />
+          )}
+          <button
+            type="button"
+            className={`menu-item ${action.danger ? "danger" : ""}`}
+            role={action.selected === undefined ? "menuitem" : "menuitemradio"}
+            aria-checked={action.selected}
+            onClick={() => {
+              dismiss(true);
+              action.onSelect();
+            }}
+          >
+            {action.icon}
+            <span style={{ color: action.color }}>{action.label}</span>
+            {action.shortcut && (
+              <kbd className="menu-shortcut">{action.shortcut}</kbd>
+            )}
+            {action.selected && <Check size={13} className="menu-check" />}
+          </button>
+        </Fragment>
       ))}
     </div>
   );
@@ -142,6 +157,7 @@ export function MenuButton({
         type="button"
         className="menu-trigger"
         aria-label={label}
+        title={label}
         aria-haspopup="menu"
         aria-expanded={!!anchor}
         onClick={(event) => {
