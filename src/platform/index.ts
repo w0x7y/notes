@@ -4,6 +4,13 @@ import { nativeFiles } from "./native";
 
 export const files = isTauri() ? nativeFiles : createDemoFiles();
 
+export async function copyText(text: string): Promise<void> {
+  if (files.kind === "native") {
+    const { writeText } = await import("@tauri-apps/plugin-clipboard-manager");
+    await writeText(text);
+  } else await navigator.clipboard.writeText(text);
+}
+
 export async function chooseWorkspaceFolder(): Promise<string | null> {
   if (files.kind === "demo")
     throw new Error(

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type MouseEvent } from "react";
 import {
   BookOpen,
   Braces,
@@ -6,6 +6,9 @@ import {
   ChevronDown,
   ChevronRight,
   FilePlus2,
+  Copy,
+  PanelsLeftRight,
+  PencilLine,
   FileText,
   Folder,
   FolderOpen,
@@ -16,6 +19,9 @@ import {
   Settings2,
 } from "lucide-react";
 import type { Entry, Workspace } from "../domain/contracts";
+import { MenuButton, PopupMenu, type MenuAnchor } from "./PopupMenu";
+import { run } from "../domain/app-store";
+import { copyText } from "../platform";
 import { basename, parentFolder } from "../domain/notes";
 
 export function WorkspaceIcon({
@@ -42,6 +48,8 @@ type Props = {
   selectedFolder: string;
   onFolder: (path: string) => void;
   onOpen: (path: string) => void;
+  onOpenSplit: (path: string) => void;
+  onRename: (path: string) => void;
   onWorkspace: (id: string) => void;
   onAddWorkspace: () => void;
   onSettings: () => void;
@@ -57,7 +65,9 @@ function FolderNode({
 }: { path: string; entries: Entry[] } & Pick<
   Props,
   "active" | "selectedFolder" | "onFolder" | "onOpen"
->) {
+> & {
+    onContextMenu: (event: MouseEvent<HTMLButtonElement>, entry: Entry) => void;
+  }) {
   const children = entries
     .filter((entry) => parentFolder(entry.path) === path)
     .sort(
@@ -80,6 +90,7 @@ function FolderNode({
             key={entry.path}
             className={`tree-row ${props.active === entry.path ? "active" : ""}`}
             onClick={() => props.onOpen(entry.path)}
+            onContextMenu={(event) => props.onContextMenu(event, entry)}
             title={entry.path}
             aria-current={props.active === entry.path ? "page" : undefined}
           >
@@ -100,7 +111,12 @@ function FolderBranch(
   props: { path: string; entries: Entry[] } & Pick<
     Props,
     "active" | "selectedFolder" | "onFolder" | "onOpen"
-  >,
+  > & {
+      onContextMenu: (
+        event: MouseEvent<HTMLButtonElement>,
+        entry: Entry,
+      ) => void;
+    },
 ) {
   const [open, setOpen] = useState(true);
   return (
@@ -125,6 +141,10 @@ function FolderBranch(
 }
 
 export function Sidebar(props: Props) {
+  const [context, setContext] = useState<{
+    entry: Entry;
+    anchor: MenuAnchor;
+  } | null>(null);
   const tags = [...new Set(props.entries.flatMap((entry) => entry.tags))].sort(
     (a, b) => a.localeCompare(b),
   );
@@ -134,22 +154,31 @@ export function Sidebar(props: Props) {
         <span style={{ color: props.workspace?.color ?? "var(--purple)" }}>
           <WorkspaceIcon icon={props.workspace?.icon ?? "book"} />
         </span>
-        <select
-          aria-label="Workspace"
-          value={props.workspace?.id ?? ""}
-          onChange={(event) => {
-            if (event.target.value === "__open__") props.onAddWorkspace();
-            else props.onWorkspace(event.target.value);
-          }}
+        <MenuButton
+          label="Workspace"
+          className="workspace-menu"
+          actions={[
+            ...props.workspaces.map((workspace) => ({
+              id: workspace.id,
+              label: workspace.name,
+              selected: workspace.id === props.workspace?.id,
+              icon: (
+                <span style={{ color: workspace.color }}>
+                  <WorkspaceIcon icon={workspace.icon} size={16} />
+                </span>
+              ),
+              onSelect: () => props.onWorkspace(workspace.id),
+            })),
+            {
+              id: "open-folder",
+              label: "Open another folder…",
+              icon: <FolderOpen size={16} />,
+              onSelect: props.onAddWorkspace,
+            },
+          ]}
         >
-          {!props.workspace && <option value="">Choose a workspace</option>}
-          {props.workspaces.map((workspace) => (
-            <option key={workspace.id} value={workspace.id}>
-              {workspace.name}
-            </option>
-          ))}
-          <option value="__open__">Open another folder…</option>
-        </select>
+          {props.workspace?.name ?? "Choose a workspace"}
+        </MenuButton>
         {props.workspace && (
           <button
             className="icon-button small"
@@ -204,6 +233,19 @@ export function Sidebar(props: Props) {
             selectedFolder={props.selectedFolder}
             onFolder={props.onFolder}
             onOpen={props.onOpen}
+            onContextMenu={(event, entry) => {
+              event.preventDefault();
+              const trigger = event.currentTarget;
+              const box = trigger.getBoundingClientRect();
+              setContext({
+                entry,
+                anchor: {
+                  x: event.clientX || box.left + 16,
+                  y: event.clientY || box.bottom,
+                  trigger,
+                },
+              });
+            }}
           />
         </nav>
         {!!tags.length && (
@@ -229,6 +271,50 @@ export function Sidebar(props: Props) {
           </div>
         )}
       </div>
+      {context && (
+        <PopupMenu
+          label="File actions"
+          anchor={context.anchor}
+          onClose={() => setContext(null)}
+          actions={[
+            {
+              id: "open",
+              label: "Open",
+              icon: <FileText size={15} />,
+              onSelect: () => props.onOpen(context.entry.path),
+            },
+            {
+              id: "split",
+              label: "Open in split pane",
+              icon: <PanelsLeftRight size={15} />,
+              onSelect: () => props.onOpenSplit(context.entry.path),
+            },
+            ...(context.entry.kind === "note"
+              ? [
+                  {
+                    id: "rename",
+                    label: "Rename or move…",
+                    icon: <PencilLine size={15} />,
+                    onSelect: () => props.onRename(context.entry.path),
+                  },
+                ]
+              : []),
+            {
+              id: "copy",
+              label: "Copy path",
+              icon: <Copy size={15} />,
+              onSelect: () =>
+                run(
+                  copyText(
+                    props.workspace
+                      ? `${props.workspace.path}/${context.entry.path}`
+                      : context.entry.path,
+                  ),
+                ),
+            },
+          ]}
+        />
+      )}
       <div className="workspace-path" title={props.workspace?.path}>
         {props.workspace?.path ?? "Local Markdown notes"}
       </div>

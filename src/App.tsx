@@ -15,6 +15,7 @@ import { Sidebar } from "./components/Sidebar";
 import { SearchDialog } from "./components/SearchDialog";
 import { TextDialog, WorkspaceDialog } from "./components/Forms";
 import { NotePane } from "./components/NotePane";
+import { SaveStatus } from "./components/SaveStatus";
 import { ImagePane } from "./components/ImagePane";
 import type { NoteDocument } from "./domain/document";
 import {
@@ -26,6 +27,7 @@ import {
   flushAll,
   hasUnsavedChanges,
   initialize,
+  loadDocument,
   newNote,
   openFile,
   refreshWorkspace,
@@ -234,18 +236,10 @@ export default function App() {
   }
 
   return (
-    <div className={`app-shell ${sidebar ? "" : "sidebar-hidden"}`}>
-      <header className="titlebar">
-        <BookOpen size={15} />
-        <span>Notes</span>
-        <span className="window-caption">
-          {focusedPath ? basename(focusedPath) + " · " : ""}
-          {workspace?.name ?? "Your notes, in your folders"}
-        </span>
-        {files.kind === "demo" && (
-          <span className="demo-label">Browser demo</span>
-        )}
-      </header>
+    <div
+      className={`app-shell ${sidebar ? "" : "sidebar-hidden"}`}
+      onContextMenu={(event) => event.preventDefault()}
+    >
       {sidebar && (
         <Sidebar
           workspaces={state.workspaces}
@@ -256,6 +250,31 @@ export default function App() {
           onFolder={setSelectedFolder}
           onOpen={(path) => {
             if (workspace) openFile(workspace.id, path);
+          }}
+          onOpenSplit={(path) => {
+            if (!workspace) return;
+            const other =
+              focusedPath === path
+                ? (session.tabs.find((item) => item !== path) ?? null)
+                : focusedPath;
+            changeSession(workspace.id, (value) => ({
+              ...value,
+              primary: other,
+              secondary: path,
+              split: true,
+              tabs: value.tabs.includes(path)
+                ? value.tabs
+                : [...value.tabs, path],
+            }));
+            useApp.setState({ focusedPane: "secondary" });
+          }}
+          onRename={(path) => {
+            if (workspace)
+              run(
+                loadDocument(workspace.id, path).then((document) =>
+                  setModal({ kind: "rename", document }),
+                ),
+              );
           }}
           onWorkspace={switchWorkspace}
           onAddWorkspace={() => run(openFolder())}
@@ -387,10 +406,16 @@ export default function App() {
             ? "Demo changes stay in this tab"
             : "Local files"}
         </span>
-        <span>{workspace?.name}</span>
+        <span className="status-workspace">{workspace?.name}</span>
+        {workspace &&
+          focusedPath &&
+          entries.find((entry) => entry.path === focusedPath)?.kind !==
+            "image" && (
+            <SaveStatus workspaceId={workspace.id} path={focusedPath} />
+          )}
         <span className="flex-1" />
         <span>Markdown</span>
-        <span>UTF-8</span>
+        <span className="status-encoding">UTF-8</span>
         <span>Auto direction</span>
       </footer>
       {modal?.kind === "search" && (

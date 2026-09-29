@@ -1,0 +1,181 @@
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { Check, ChevronDown } from "lucide-react";
+
+export type MenuAction = {
+  id: string;
+  label: string;
+  icon?: ReactNode;
+  selected?: boolean;
+  onSelect: () => void;
+};
+export type MenuAnchor = {
+  x: number;
+  y: number;
+  trigger: HTMLElement;
+  width?: number;
+};
+
+export function PopupMenu({
+  label,
+  actions,
+  anchor,
+  onClose,
+}: {
+  label: string;
+  actions: MenuAction[];
+  anchor: MenuAnchor;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
+  const dismiss = (restoreFocus: boolean) => {
+    if (restoreFocus && anchor.trigger.isConnected)
+      anchor.trigger.focus({ preventScroll: true });
+    close.current();
+  };
+  useLayoutEffect(() => {
+    const menu = ref.current;
+    if (!menu) return;
+    menu.showPopover();
+    const box = menu.getBoundingClientRect();
+    menu.style.left = `${Math.max(6, Math.min(anchor.x, window.innerWidth - box.width - 6))}px`;
+    menu.style.top = `${Math.max(6, Math.min(anchor.y, window.innerHeight - box.height - 6))}px`;
+    (
+      menu.querySelector<HTMLButtonElement>('[aria-checked="true"]') ??
+      menu.querySelector<HTMLButtonElement>("button")
+    )?.focus({ preventScroll: true });
+    const outside = (event: PointerEvent) => {
+      if (
+        event.target instanceof Node &&
+        !menu.contains(event.target) &&
+        !anchor.trigger.contains(event.target)
+      )
+        close.current();
+    };
+    const resize = () => close.current();
+    document.addEventListener("pointerdown", outside, true);
+    window.addEventListener("resize", resize);
+    return () => {
+      menu.hidePopover();
+      document.removeEventListener("pointerdown", outside, true);
+      window.removeEventListener("resize", resize);
+    };
+  }, [anchor]);
+
+  return (
+    <div
+      ref={ref}
+      popover="manual"
+      className="popup-menu"
+      role="menu"
+      aria-label={label}
+      style={{ left: anchor.x, top: anchor.y, minWidth: anchor.width }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape" || event.key === "Tab") {
+          event.preventDefault();
+          event.stopPropagation();
+          dismiss(true);
+          return;
+        }
+        const buttons = [
+          ...(ref.current?.querySelectorAll<HTMLButtonElement>("button") ?? []),
+        ];
+        const index = buttons.findIndex(
+          (button) => button === document.activeElement,
+        );
+        const next =
+          event.key === "ArrowDown"
+            ? (index + 1) % buttons.length
+            : event.key === "ArrowUp"
+              ? (index - 1 + buttons.length) % buttons.length
+              : event.key === "Home"
+                ? 0
+                : event.key === "End"
+                  ? buttons.length - 1
+                  : null;
+        if (next !== null) {
+          event.preventDefault();
+          event.stopPropagation();
+          buttons[next]?.focus();
+        }
+      }}
+    >
+      {actions.map((action) => (
+        <button
+          key={action.id}
+          type="button"
+          className="menu-item"
+          role={action.selected === undefined ? "menuitem" : "menuitemradio"}
+          aria-checked={action.selected}
+          onClick={() => {
+            dismiss(true);
+            action.onSelect();
+          }}
+        >
+          {action.icon}
+          <span>{action.label}</span>
+          {action.selected && <Check size={13} className="menu-check" />}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export function MenuButton({
+  label,
+  children,
+  actions,
+  className = "",
+}: {
+  label: string;
+  children: ReactNode;
+  actions: MenuAction[];
+  className?: string;
+}) {
+  const [anchor, setAnchor] = useState<MenuAnchor | null>(null);
+  return (
+    <div className={`menu-control ${className}`}>
+      <button
+        type="button"
+        className="menu-trigger"
+        aria-label={label}
+        aria-haspopup="menu"
+        aria-expanded={!!anchor}
+        onClick={(event) => {
+          const trigger = event.currentTarget;
+          const box = trigger.getBoundingClientRect();
+          setAnchor(
+            anchor
+              ? null
+              : { x: box.left, y: box.bottom + 4, width: box.width, trigger },
+          );
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault();
+            const trigger = event.currentTarget;
+            const box = trigger.getBoundingClientRect();
+            setAnchor({
+              x: box.left,
+              y: box.bottom + 4,
+              width: box.width,
+              trigger,
+            });
+          }
+        }}
+      >
+        <span className="menu-trigger-label">{children}</span>
+        <ChevronDown size={13} />
+      </button>
+      {anchor && (
+        <PopupMenu
+          label={label}
+          actions={actions}
+          anchor={anchor}
+          onClose={() => setAnchor(null)}
+        />
+      )}
+    </div>
+  );
+}

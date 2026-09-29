@@ -2,6 +2,8 @@ import { useState, type FormEvent } from "react";
 import type { Workspace } from "../domain/contracts";
 import { errorMessage } from "../domain/notes";
 import { Dialog } from "./Dialog";
+import { MenuButton } from "./PopupMenu";
+import { WorkspaceIcon } from "./Sidebar";
 
 export function TextDialog({
   title,
@@ -113,17 +115,42 @@ export function WorkspaceDialog({
               onChange={(event) => setColor(event.target.value)}
             />
           </label>
-          <label>
-            Icon
-            <select
-              value={icon}
-              onChange={(event) => setIcon(event.target.value)}
+          <div className="form-field">
+            <span>Icon</span>
+            <MenuButton
+              label="Workspace icon"
+              actions={[
+                {
+                  id: "book",
+                  label: "Book",
+                  selected: icon === "book",
+                  icon: <WorkspaceIcon icon="book" size={16} />,
+                  onSelect: () => setIcon("book"),
+                },
+                {
+                  id: "code",
+                  label: "Code",
+                  selected: icon === "code",
+                  icon: <WorkspaceIcon icon="code" size={16} />,
+                  onSelect: () => setIcon("code"),
+                },
+                {
+                  id: "work",
+                  label: "Briefcase",
+                  selected: icon === "work",
+                  icon: <WorkspaceIcon icon="work" size={16} />,
+                  onSelect: () => setIcon("work"),
+                },
+              ]}
             >
-              <option value="book">Book</option>
-              <option value="code">Code</option>
-              <option value="work">Briefcase</option>
-            </select>
-          </label>
+              <WorkspaceIcon icon={icon} size={16} />
+              {icon === "code"
+                ? "Code"
+                : icon === "work"
+                  ? "Briefcase"
+                  : "Book"}
+            </MenuButton>
+          </div>
         </div>
         <p className="muted">{workspace.path}</p>
         {error && <p className="form-error">{error}</p>}

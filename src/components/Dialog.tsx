@@ -16,7 +16,19 @@ export function Dialog({
   useEffect(() => {
     const dialog = ref.current;
     dialog?.showModal();
+    // React autoFocus runs before a closed dialog is visible. Focus again
+    // after showModal, choosing the first field rather than the close button.
+    const focusField = () => {
+      dialog
+        ?.querySelector<HTMLElement>(
+          'input:not([type="hidden"]), textarea, [data-dialog-focus], button[type="submit"]',
+        )
+        ?.focus({ preventScroll: true });
+    };
+    focusField();
+    const focusTimer = window.setTimeout(focusField, 0);
     return () => {
+      window.clearTimeout(focusTimer);
       dialog?.close();
     };
   }, []);

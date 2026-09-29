@@ -27,13 +27,15 @@ On NVIDIA/Wayland, startup applies `__NV_DISABLE_EXPLICIT_SYNC=1` unless explici
 ## Included
 
 - Open folders as workspaces; customize their names, colors, and icons.
+- Workspace and icon menus use the app theme. Dialogs focus their first field on opening; menus support arrow keys and Escape without focus outlines.
+- Right-click a file to open it, open it in a split pane, rename/move a note, or copy its full path.
 - Ordinary `.md` files, optional folders, inline English/Hebrew tags.
 - Global fuzzy title/tag search, with the current workspace first. Combine terms, such as `vector #exam`.
 - Workspace-specific tabs and split panes, restored on restart.
 - Raw Markdown editing, a toggleable formatting bar, and a preview whose paragraphs reveal editable Markdown when clicked.
 - Automatic paragraph direction for mixed Hebrew/English; code stays LTR.
 - Tables, task lists, syntax-highlighted code, math, wiki links, existing inline images, and image tabs with zoom.
-- Debounced autosave with Saving/Saved/Failed states, retry, and Save a copy. Saving and renaming share a document queue so typing can continue during disk writes.
+- Debounced autosave with Saving/Saved/Failed states in the bottom status bar, retry, and Save a copy. Saving and renaming share a document queue so typing can continue during disk writes.
 - New filenames follow the title until manually renamed. Existing files retain their names. Clicking the filename above a note opens rename/move.
 - Atomic writes, revision conflict detection, and save-before-close. A failed save keeps the window open and retains the text in memory.
 

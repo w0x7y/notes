@@ -7,12 +7,9 @@ import {
   useSyncExternalStore,
 } from "react";
 import {
-  Check,
   ChevronRight,
   Eye,
-  LoaderCircle,
   PencilLine,
-  RefreshCw,
   TriangleAlert,
   Type,
 } from "lucide-react";
@@ -20,8 +17,6 @@ import type { NoteDocument } from "../domain/document";
 import {
   loadDocument,
   openFile,
-  run,
-  saveCopy,
   showError,
   toggleToolbar,
   useApp,
@@ -189,33 +184,6 @@ function NoteView({
             />
           )}
         </article>
-      </div>
-      <div className={`save-status ${snapshot.status.kind}`} role="status">
-        {snapshot.status.kind === "saved" ? (
-          <>
-            <Check size={13} />
-            <span>Saved</span>
-          </>
-        ) : snapshot.status.kind === "saving" ? (
-          <>
-            <LoaderCircle size={13} className="spin" />
-            <span>Saving…</span>
-          </>
-        ) : (
-          <>
-            <TriangleAlert size={14} />
-            <span title={snapshot.status.message}>
-              Save failed: {snapshot.status.message}
-            </span>
-            <button onClick={() => run(document.flush())}>
-              <RefreshCw size={12} /> Retry
-            </button>
-            <button onClick={() => run(saveCopy(document))}>Save a copy</button>
-          </>
-        )}
-        <span className="save-status-detail">
-          {snapshot.autoRename ? "Filename follows title" : "Custom filename"}
-        </span>
       </div>
     </>
   );

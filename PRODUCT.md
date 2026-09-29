@@ -36,6 +36,8 @@ A student and developer replacing their Obsidian workflow with a focused, keyboa
 
 The user supplied a Zed screenshot and requested a compact dark editor with thin borders and little clutter. They subsequently requested "Dark One Pro", interpreted as One Dark Pro from Binaryify. The mockup uses that theme's published palette.
 
+The working interface omits the extra top title bar and per-pane save strip. The active note's save indicator sits in the bottom status bar after the workspace name. Dropdowns and file context menus use the app palette. Popups focus their first field or selected menu item on opening. Focus outlines are disabled at the user's request, and tab hover keeps the whole tab intact.
+
 ## Current scope
 
 First working desktop build, including workspace folders, Markdown editing and preview, autosave, title/tag search, tabs, split panes, and existing images. See `README.md` for commands, verification, and current limits. App name remains undecided; “Notes” is the working name.
