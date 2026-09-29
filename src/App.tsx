@@ -40,6 +40,9 @@ const TemplateDialog = lazy(() =>
 const TasksDialog = lazy(() =>
   import("./knowledge/TasksDialog").then((m) => ({ default: m.TasksDialog })),
 );
+const GraphDialog = lazy(() =>
+  import("./graph/GraphDialog").then((m) => ({ default: m.GraphDialog })),
+);
 const ProjectsDialog = lazy(() =>
   import("./knowledge/ProjectsDialog").then((m) => ({
     default: m.ProjectsDialog,
@@ -114,7 +117,10 @@ import { chooseWorkspaceFolder, files } from "./platform";
 
 type Modal =
   | { kind: "search"; query: string }
-  | { kind: "contents" | "commands" | "templates" | "tasks" | "projects" }
+  | {
+      kind:
+        "contents" | "commands" | "templates" | "tasks" | "projects" | "graph";
+    }
   | { kind: "folder" }
   | { kind: "workspace" }
   | { kind: "settings" }
@@ -374,6 +380,11 @@ export default function App() {
             id: "tasks",
             label: "Show workspace tasks",
             run: () => setModal({ kind: "tasks" }),
+          },
+          {
+            id: "graph",
+            label: "Open note graph",
+            run: () => setModal({ kind: "graph" }),
           },
           {
             id: "projects",
@@ -710,6 +721,13 @@ export default function App() {
         )}
         {modal?.kind === "tasks" && workspace && (
           <TasksDialog workspaceId={workspace.id} onClose={closeModal} />
+        )}
+        {modal?.kind === "graph" && workspace && (
+          <GraphDialog
+            workspaceId={workspace.id}
+            currentPath={focusedPath}
+            onClose={closeModal}
+          />
         )}
         {modal?.kind === "projects" && workspace && (
           <ProjectsDialog workspaceId={workspace.id} onClose={closeModal} />

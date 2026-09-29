@@ -9,12 +9,14 @@ import {
   FilePlus2,
   Ellipsis,
   Settings2,
+  Network,
 } from "lucide-react";
 import { MenuButton } from "../components/PopupMenu";
 import { openFile, useApp } from "../domain/app-store";
 import { useLibrary, toggleFavorite } from "./library";
 import "./knowledge.css";
 export type WorkspaceTool =
+  | "graph"
   | "contents"
   | "commands"
   | "tasks"
@@ -78,6 +80,12 @@ export function WorkspaceTools({
                 separatorBefore: true,
                 icon: <ListTodo size={15} />,
                 onSelect: () => onTool("tasks"),
+              },
+              {
+                id: "graph",
+                label: "Note graph",
+                icon: <Network size={15} />,
+                onSelect: () => onTool("graph"),
               },
               {
                 id: "projects",

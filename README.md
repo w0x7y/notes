@@ -36,6 +36,7 @@ On NVIDIA/Wayland, startup applies `__NV_DISABLE_EXPLICIT_SYNC=1` unless explici
 - Global fuzzy title/tag search, with the current workspace first. Combine terms, such as `vector #exam`.
 - Full-text search with matching snippets, workspace/folder/tag filters, and saved searches.
 - Note/heading autocomplete, backlinks, heading outline, pinned notes, and Markdown slash commands.
+- An on-demand [note graph](docs/note-graph.md) with workspace/global/local views, search, pan, zoom and linked-note navigation.
 - Command palette, quick capture and daily notes in a dedicated Quick Notes workspace.
 - Editable Markdown starter templates, workspace task overview, and YAML properties with table/board views. See [workflow details](docs/note-workflows.md).
 - Lightweight drawings with editable source and portable SVG previews. See [drawing controls and storage](docs/drawings.md).

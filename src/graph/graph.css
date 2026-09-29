@@ -1,0 +1,228 @@
+.graph-dialog {
+  margin: auto;
+  width: min(1140px, 95vw);
+  height: min(780px, 90dvh);
+  max-height: 90dvh;
+  display: flex;
+  flex-direction: column;
+}
+.graph-dialog .dialog-header,
+.graph-toolbar,
+.graph-footer {
+  flex-shrink: 0;
+}
+.graph-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.graph-search {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex: 1;
+  min-width: 160px;
+  color: var(--muted);
+}
+.graph-search input {
+  width: 100%;
+  min-width: 0;
+  padding: 6px 0;
+  background: transparent;
+  border: 0;
+  color: var(--bright);
+  font: inherit;
+  font-size: 13px;
+}
+.graph-toolbar .menu-trigger {
+  font-size: 12px;
+  padding: 6px 9px;
+}
+.graph-content {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+.graph-stage {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+  background: #252930;
+}
+.graph-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+  user-select: none;
+  cursor: grab;
+}
+.graph-canvas:active {
+  cursor: grabbing;
+}
+.graph-edges line {
+  stroke: #555e6b;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.graph-edges line.active {
+  stroke: #abb2bf;
+  stroke-width: 1.5;
+}
+.graph-marker {
+  transform: scale(var(--graph-marker-scale, 1));
+}
+.graph-node {
+  cursor: pointer;
+}
+.graph-node text {
+  font-family: inherit;
+  font-size: 11px;
+  fill: #abb2bf;
+  stroke: #252930;
+  stroke-width: 4px;
+  paint-order: stroke;
+  pointer-events: none;
+  unicode-bidi: plaintext;
+}
+.graph-node text.active {
+  fill: #e5e7eb;
+}
+.graph-hit {
+  fill: transparent;
+}
+.graph-ring {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  opacity: 0.8;
+}
+.graph-zoom {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px;
+  background: #21252bf2;
+  border: 1px solid #3a414d;
+  border-radius: 5px;
+}
+.graph-zoom span {
+  min-width: 42px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.graph-hint {
+  position: absolute;
+  bottom: 17px;
+  left: 14px;
+  color: var(--muted);
+  font-size: 10px;
+  pointer-events: none;
+}
+.graph-note-list {
+  width: 230px;
+  flex-shrink: 0;
+  overflow: auto;
+  border-left: 1px solid var(--border);
+  background: #21252b;
+}
+.graph-list-heading {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.graph-note-list button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 9px 12px;
+  text-align: start;
+}
+.graph-note-list button:hover,
+.graph-note-list button:focus {
+  background: var(--hover);
+}
+.graph-note-list button > span:last-child {
+  min-width: 0;
+}
+.graph-note-list strong,
+.graph-note-list small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.graph-note-list strong {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--bright);
+}
+.graph-note-list small {
+  font-size: 10px;
+  margin-top: 3px;
+  color: var(--muted);
+}
+.graph-note-dot {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 50%;
+}
+.graph-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 9px 16px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11px;
+}
+.graph-empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 24px;
+  color: var(--muted);
+  font-size: 13px;
+  gap: 12px;
+  text-align: center;
+}
+.graph-empty p {
+  margin: 0;
+}
+.graph-empty span,
+.graph-no-matches {
+  font-size: 12px;
+  color: var(--muted);
+}
+.graph-empty button {
+  padding: 8px 16px;
+  border: 1px solid #3a414d;
+  border-radius: 4px;
+}
+.graph-no-matches {
+  padding: 12px;
+}
+@media (max-width: 850px) {
+  .graph-note-list {
+    width: 190px;
+  }
+  .graph-hint {
+    display: none;
+  }
+}
