@@ -27,6 +27,12 @@ pub struct Snapshot {
     pub entries: Vec<Entry>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Appearance {
+    pub icon: Option<String>,
+    pub color: Option<String>,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NoteFile {
@@ -50,6 +56,18 @@ pub struct SaveResult {
     #[serde(flatten)]
     pub note: NoteFile,
     pub rewritten: Vec<Rewrite>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct RenameImageResult {
+    pub path: String,
+    pub rewritten: Vec<Rewrite>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct DeleteResult {
     pub warnings: Vec<String>,
 }
 
@@ -81,6 +99,8 @@ pub struct Settings {
     pub active_workspace_id: Option<String>,
     #[serde(default)]
     pub sessions: HashMap<String, Session>,
+    #[serde(default)]
+    pub appearances: HashMap<String, HashMap<String, Appearance>>,
     #[serde(default = "toolbar_default")]
     pub toolbar_visible: bool,
 }
@@ -91,12 +111,13 @@ impl Default for Settings {
             workspaces: Vec::new(),
             active_workspace_id: None,
             sessions: HashMap::new(),
+            appearances: HashMap::new(),
             toolbar_visible: true,
         }
     }
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub(crate) struct Stored {
     #[serde(flatten)]
     pub settings: Settings,

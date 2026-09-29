@@ -28,10 +28,12 @@ On NVIDIA/Wayland, startup applies `__NV_DISABLE_EXPLICIT_SYNC=1` unless explici
 
 - Open folders as workspaces; customize their names, colors, and icons.
 - Workspace and icon menus use the app theme. Dialogs focus their first field on opening; menus support arrow keys and Escape without focus outlines.
-- Right-click a file to open it, open it in a split pane, rename/move a note, or copy its full path.
+- Right-click a note or image to open it, split it, rename/move it, customize its icon/color, copy its path, or move it to Trash.
+- Right-click folders to customize their icon and name color. All 2,118 names in the installed free Lucide catalog are searchable and bundled offline; no account is needed. Workspace settings use the same picker. Colors can use a palette or a custom hex value.
+- Remove a workspace through its settings without deleting its directory. Pending notes save first; failures keep the workspace open.
 - Ordinary `.md` files, optional folders, inline English/Hebrew tags.
 - Global fuzzy title/tag search, with the current workspace first. Combine terms, such as `vector #exam`.
-- Workspace-specific tabs and split panes, restored on restart.
+- Workspace-specific tabs and split panes, restored on restart. Middle-click a tab to close it after saving.
 - Raw Markdown editing, a toggleable formatting bar, and a preview whose paragraphs reveal editable Markdown when clicked.
 - Automatic paragraph direction for mixed Hebrew/English; code stays LTR.
 - Tables, task lists, syntax-highlighted code, math, wiki links, existing inline images, and image tabs with zoom.
@@ -66,9 +68,10 @@ cargo clippy --all-targets -- -D warnings
 
 Verified on 2026-09-29:
 
-- 19 frontend tests and 25 native filesystem tests passed; TypeScript, clippy, and the native release build passed.
+- 24 frontend tests and 40 native filesystem tests passed; TypeScript, clippy, and the native release build passed.
 - Browser interactions exercised new notes, title-driven names, autosave, Hebrew direction, editing a preview block, tag search, cross-workspace search navigation, the formatting bar, and split panes.
 - The native release opened a temporary workspace on Hyprland, displayed its Markdown, created a note through Ctrl+N, saved typed content as `smoke.md`, and flushed the last keystroke when the window closed. The saved workspace session was inspected on disk. No personal note folder was used.
+- Browser checks also exercised middle-click closing, image rename/move and deletion, file/folder colors, workspace icons, icon search/pagination, and workspace removal. New regression tests cover delayed confirmations after automatic renames, pending edits before image-link rewriting, Trash failure, and metadata persistence.
 - A browser microbenchmark over 500 generated notes and 200 queries measured about 0.1 ms median / 0.2 ms p95 for the search function. This excludes rendering and does not measure native typing latency.
 - Independent frontend and native reviews found save/rename races and Markdown link/code edge cases; regression tests cover the fixes. Review reports are in `docs/`.
 
@@ -80,3 +83,5 @@ Verified on 2026-09-29:
 - Existing images are supported; clipboard/drop image insertion is intentionally absent. Image tabs accept the native service’s supported formats and size limit.
 - Conflicting unsaved text is kept in memory and can be saved as a copy; there is no recovery journal after a process or system crash. External programs can still race a save in the short interval between revision checking and atomic replacement.
 - The initial JavaScript bundle currently triggers Vite’s size warning. Preview and code-language modules load on demand; end-to-end latency and large-file profiling remain future work.
+
+Lucide and its Feather-derived icon license notices are included in `public/THIRD_PARTY_NOTICES.txt`, which is embedded in the desktop frontend build.

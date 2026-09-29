@@ -21,7 +21,10 @@ A student and developer replacing their Obsidian workflow with a focused, keyboa
 - Existing folders open as workspaces, identified by a color and icon in a sidebar dropdown.
 - Regular Markdown files remain on disk; optional folders and inline English or Hebrew tags organize notes.
 - Global fuzzy search matches titles and tags, with current-workspace results first. No full-text search in v1.
-- Each workspace remembers its own tabs and split-pane layout.
+- Each workspace remembers its own tabs and split-pane layout. Middle-click closes a tab after saving.
+- Notes, images, and folders can each use a custom icon and name color. The complete installed free Lucide catalog is searchable and bundled offline without an account. Workspaces use the same icon picker.
+- File context menus rename/move notes and images, and delete them by moving them to desktop Trash.
+- Workspace settings can remove a registration while leaving its directory and files untouched.
 - Raw Markdown is the default. Editable preview reveals the active paragraph's source.
 - English interface, mixed Hebrew and English notes, automatic direction per paragraph, left-to-right code.
 - Basic Markdown, task lists, syntax-highlighted code, tables, math, images, and wiki links.

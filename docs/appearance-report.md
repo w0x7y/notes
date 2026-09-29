@@ -1,0 +1,7 @@
+# Appearance controls and Lucide notice
+
+The appearance controls use the installed `lucide-react` 1.48.0 catalog. The icon picker reads all 2,118 keys from the package's `dynamicIconImports`, including names retained by Lucide as aliases. Search filters the full catalog and pages through 56 options at a time. Each icon loads from a bundled split chunk when displayed; the renderer caches loaded components across rerenders. No account or network icon service is involved.
+
+`AppearanceFields` accepts nullable icon and color values. File and folder dialogs can pass `allowDefault` or omit it, which exposes reset actions. Workspace settings pass `allowDefault={false}`. The text input accepts only `#RRGGBB` and uses native form validation to stop submission while an incomplete or invalid value is entered.
+
+The authoritative license is [Lucide's repository LICENSE](https://github.com/lucide-icons/lucide/blob/main/LICENSE). The installed package also includes the complete text at `node_modules/lucide-react/LICENSE`. It has the Lucide ISC notice and the Feather MIT notice for the icon names listed there. Distribute that complete, unmodified file with the desktop application as a third-party notice, such as `THIRD_PARTY_NOTICES/lucide-react-LICENSE`; the source link alone does not carry the required notices into an offline distribution. Keep the file in the packaged build when bundling or packaging changes.

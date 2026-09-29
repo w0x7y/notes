@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type {
+  Appearance,
   Entry,
   SaveResult,
   SearchEntry,
@@ -28,6 +29,7 @@ export const useApp = create<AppState>(() => ({
   workspaces: [],
   activeWorkspaceId: null,
   sessions: {},
+  appearances: {},
   toolbarVisible: false,
   ready: false,
   entries: {},
@@ -37,6 +39,7 @@ export const useApp = create<AppState>(() => ({
 const documents = new Map<string, NoteDocument>();
 const loading = new Map<string, Promise<NoteDocument>>();
 let persistTimer: ReturnType<typeof setTimeout> | undefined;
+let persisting: Promise<void> = Promise.resolve();
 const key = (id: string, path: string) => `${id}\0${path}`;
 export const showError = (error: unknown) =>
   useApp.setState({ notice: errorMessage(error) });
@@ -47,7 +50,13 @@ export const run = (operation: Promise<unknown>) => {
 export async function persistNow(): Promise<void> {
   clearTimeout(persistTimer);
   const { sessions, activeWorkspaceId, toolbarVisible } = useApp.getState();
-  await files.saveSessions({ sessions, activeWorkspaceId, toolbarVisible });
+  const save = persisting
+    .catch(() => {})
+    .then(() =>
+      files.saveSessions({ sessions, activeWorkspaceId, toolbarVisible }),
+    );
+  persisting = save;
+  await save;
 }
 function persistSoon(): void {
   clearTimeout(persistTimer);
@@ -164,6 +173,132 @@ function removeTab(id: string, currentPath: string): void {
   });
 }
 
+function remapAppearance(id: string, previousPath: string, path: string): void {
+  useApp.setState((state) => {
+    const entries = { ...state.appearances[id] };
+    const appearance = entries[previousPath];
+    if (!appearance) return state;
+    delete entries[previousPath];
+    entries[path] = appearance;
+    return { appearances: { ...state.appearances, [id]: entries } };
+  });
+}
+
+export async function setEntryAppearance(
+  id: string,
+  path: string,
+  appearance: Appearance,
+  note?: NoteDocument,
+): Promise<void> {
+  const document =
+    note ?? documents.get(key(id, path)) ?? (await loading.get(key(id, path)));
+  await document?.flush();
+  const currentPath = document?.getSnapshot().path ?? path;
+  const updated = await files.setEntryAppearance(id, currentPath, appearance);
+  useApp.setState((state) => ({
+    appearances: {
+      ...state.appearances,
+      [id]: { ...state.appearances[id], [currentPath]: updated },
+    },
+  }));
+}
+
+export async function renameImage(
+  id: string,
+  path: string,
+  name: string,
+): Promise<void> {
+  // Incoming image links can live in any open workspace. Save pending edits
+  // before the backend rewrites them so their revisions stay in sync.
+  await flushAll();
+  const result = await files.renameImage(id, path, name);
+  remapAppearance(id, path, result.path);
+  changeSession(id, (session) => ({
+    ...session,
+    tabs: session.tabs.map((tab) => (tab === path ? result.path : tab)),
+    primary: session.primary === path ? result.path : session.primary,
+    secondary: session.secondary === path ? result.path : session.secondary,
+  }));
+  useApp.setState((state) => ({
+    entries: {
+      ...state.entries,
+      [id]: (state.entries[id] ?? []).map((entry) =>
+        entry.path === path
+          ? {
+              ...entry,
+              path: result.path,
+              title: result.path.split("/").at(-1) ?? result.path,
+            }
+          : entry,
+      ),
+    },
+  }));
+  for (const rewrite of result.rewritten) {
+    documents
+      .get(key(rewrite.workspaceId, rewrite.path))
+      ?.receiveExternal(rewrite.content, rewrite.revision);
+  }
+  if (result.warnings.length) showError(result.warnings.join("\n"));
+}
+
+export async function deleteEntry(
+  id: string,
+  path: string,
+  kind: "note" | "image",
+  note?: NoteDocument,
+): Promise<void> {
+  const document =
+    kind === "note" ? (note ?? (await loadDocument(id, path))) : undefined;
+  await document?.flush();
+  const currentPath = document?.getSnapshot().path ?? path;
+  await persistNow();
+  const result = await files.deleteFile(
+    id,
+    currentPath,
+    document?.file.revision ?? null,
+  );
+  document?.dispose();
+  documents.delete(key(id, currentPath));
+  removeTab(id, currentPath);
+  useApp.setState((state) => {
+    const appearances = { ...state.appearances[id] };
+    delete appearances[currentPath];
+    return {
+      entries: {
+        ...state.entries,
+        [id]: (state.entries[id] ?? []).filter(
+          (entry) => entry.path !== currentPath,
+        ),
+      },
+      appearances: { ...state.appearances, [id]: appearances },
+    };
+  });
+  if (result.warnings.length) showError(result.warnings.join("\n"));
+}
+
+export async function removeWorkspace(id: string): Promise<void> {
+  await Promise.allSettled(
+    [...loading.entries()]
+      .filter(([entryKey]) => entryKey.startsWith(id + "\0"))
+      .map(([, request]) => request),
+  );
+  const workspaceDocuments = [...documents.values()].filter(
+    (document) => document.workspaceId === id,
+  );
+  await Promise.all(workspaceDocuments.map((document) => document.flush()));
+  await persistNow();
+  const settings = await files.removeWorkspace(id);
+  for (const document of workspaceDocuments) {
+    document.dispose();
+    documents.delete(key(id, document.getSnapshot().path));
+  }
+  useApp.setState((state) => {
+    const entries = { ...state.entries };
+    delete entries[id];
+    return { ...settings, entries, focusedPane: "primary" };
+  });
+}
+
 function saved(
   document: NoteDocument,
   previousPath: string,
@@ -171,6 +306,7 @@ function saved(
 ): void {
   const id = document.workspaceId;
   if (previousPath !== result.path) {
+    remapAppearance(id, previousPath, result.path);
     documents.delete(key(id, previousPath));
     documents.set(key(id, result.path), document);
     changeSession(id, (session) => ({
@@ -273,6 +409,8 @@ export async function saveCopy(document: NoteDocument): Promise<void> {
 
 export async function refreshWorkspace(id: string): Promise<void> {
   const snapshot = await files.scanWorkspace(id);
+  if (!useApp.getState().workspaces.some((workspace) => workspace.id === id))
+    return;
   useApp.setState((state) => ({
     entries: { ...state.entries, [id]: snapshot.entries },
   }));

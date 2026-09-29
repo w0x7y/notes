@@ -636,3 +636,474 @@ fn nested_blockquote_fence_does_not_contribute_tags_or_rewrite_links() {
         "> ````md\n> [[a]] #hidden\n> ```\n> [[a]] #stillhidden\n> ````\n[[b]] #visible\n"
     );
 }
+
+#[test]
+fn appearance_follows_note_renames_and_rejects_invalid_entries() {
+    use notes_lib::model::Appearance;
+    let (_config, service) = service();
+    let root = tempdir().unwrap();
+    let id = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    let note = service.create_note(&id, "").unwrap();
+    let appearance = Appearance {
+        icon: Some("file-heart".into()),
+        color: Some("#A1b2C3".into()),
+    };
+    service
+        .set_entry_appearance(&id, &note.path, appearance.clone())
+        .unwrap();
+    assert!(service
+        .set_entry_appearance(&id, "../outside", appearance.clone())
+        .is_err());
+    assert!(service
+        .set_entry_appearance(&id, "missing.md", appearance.clone())
+        .is_err());
+    let saved = service
+        .save_note(&id, &note.path, "# Topic", &note.revision)
+        .unwrap();
+    assert_eq!(
+        service.load_settings().unwrap().appearances[&id][&saved.path],
+        appearance
+    );
+    let renamed = service
+        .rename_note(&id, &saved.path, "Chosen", &saved.revision)
+        .unwrap();
+    let settings = service.load_settings().unwrap();
+    assert_eq!(settings.appearances[&id][&renamed.path], appearance);
+    assert!(!settings.appearances[&id].contains_key(&saved.path));
+}
+
+#[test]
+fn removing_offline_workspace_only_changes_registration_metadata() {
+    use notes_lib::model::Appearance;
+    let (config, service) = service();
+    let holder = tempdir().unwrap();
+    let root = holder.path().join("notes");
+    fs::create_dir(&root).unwrap();
+    fs::write(root.join("a.md"), "keep").unwrap();
+    let id = service
+        .add_workspace(root.to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    service
+        .set_entry_appearance(
+            &id,
+            "a.md",
+            Appearance {
+                icon: None,
+                color: Some("#123456".into()),
+            },
+        )
+        .unwrap();
+    let note = service.read_note(&id, "a.md").unwrap();
+    service.save_sessions(serde_json::from_value(serde_json::json!({id.clone(): {"tabs": ["a.md"], "primary": "a.md", "secondary": null, "split": false}})).unwrap(), Some(id.clone()), true).unwrap();
+    fs::rename(&root, holder.path().join("offline")).unwrap();
+    let settings = service.remove_workspace(&id).unwrap();
+    assert!(settings.workspaces.is_empty());
+    assert!(settings.sessions.is_empty());
+    assert!(settings.appearances.is_empty());
+    assert!(settings.active_workspace_id.is_none());
+    assert_eq!(
+        fs::read_to_string(holder.path().join("offline/a.md")).unwrap(),
+        "keep"
+    );
+    assert_eq!(service.load_settings().unwrap().workspaces.len(), 0);
+    drop(service);
+    let config_text = fs::read_to_string(config.path().join("notes.json")).unwrap();
+    assert!(!config_text.contains(&id));
+    assert!(!note.auto_rename);
+}
+
+#[test]
+fn image_rename_preserves_extension_and_rewrites_resolvable_embeds() {
+    use notes_lib::model::Appearance;
+    let (_config, service) = service();
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("assets")).unwrap();
+    fs::write(root.path().join("old.png"), b"pixels").unwrap();
+    fs::write(
+        root.path().join("ref.md"),
+        "![[old.png]] ![image](old.png) `![[old.png]]` ![[missing.png]]",
+    )
+    .unwrap();
+    let id = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    let appearance = Appearance {
+        icon: Some("image".into()),
+        color: None,
+    };
+    service
+        .set_entry_appearance(&id, "old.png", appearance.clone())
+        .unwrap();
+    let result = service.rename_image(&id, "old.png", "assets/new").unwrap();
+    assert_eq!(result.path, "assets/new.png");
+    assert_eq!(
+        fs::read(root.path().join("assets/new.png")).unwrap(),
+        b"pixels"
+    );
+    assert_eq!(
+        fs::read_to_string(root.path().join("ref.md")).unwrap(),
+        "![[new.png]] ![image](assets/new.png) `![[old.png]]` ![[missing.png]]"
+    );
+    assert_eq!(result.rewritten.len(), 1);
+    assert_eq!(
+        service.load_settings().unwrap().appearances[&id][&result.path],
+        appearance
+    );
+    assert!(service
+        .rename_image(&id, &result.path, "../escape")
+        .is_err());
+    assert!(service
+        .rename_image(&id, &result.path, "other.jpg")
+        .is_err());
+    fs::write(root.path().join("assets/existing.png"), b"existing").unwrap();
+    assert!(service
+        .rename_image(&id, &result.path, "assets/existing.png")
+        .is_err());
+    assert_eq!(
+        fs::read(root.path().join("assets/existing.png")).unwrap(),
+        b"existing"
+    );
+}
+
+#[test]
+fn image_rename_bare_destination_moves_nested_image_to_workspace_root() {
+    let (_config, service) = service();
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("Lectures")).unwrap();
+    fs::write(root.path().join("Lectures/image.svg"), b"<svg/>").unwrap();
+    fs::write(
+        root.path().join("ref.md"),
+        "![[/Lectures/image.svg]] ![figure](Lectures/image.svg)",
+    )
+    .unwrap();
+    let id = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    service.save_sessions(serde_json::from_value(serde_json::json!({id.clone(): {"tabs": ["Lectures/image.svg"], "primary": "Lectures/image.svg", "secondary": null, "split": false}})).unwrap(), Some(id.clone()), true).unwrap();
+    let result = service
+        .rename_image(&id, "Lectures/image.svg", "Renamed.svg")
+        .unwrap();
+    assert_eq!(result.path, "Renamed.svg");
+    assert!(root.path().join("Renamed.svg").exists());
+    assert!(!root.path().join("Lectures/image.svg").exists());
+    assert_eq!(
+        fs::read_to_string(root.path().join("ref.md")).unwrap(),
+        "![[/Renamed.svg]] ![figure](Renamed.svg)"
+    );
+    let session = &service.load_settings().unwrap().sessions[&id];
+    assert_eq!(session.tabs, ["Renamed.svg"]);
+    assert_eq!(session.primary.as_deref(), Some("Renamed.svg"));
+}
+
+#[test]
+fn image_rename_rewrites_embeds_without_changing_note_wiki_links() {
+    let (_config, service) = service();
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("old.png"), b"pixels").unwrap();
+    fs::write(root.path().join("old.png.md"), "# Note").unwrap();
+    fs::write(
+        root.path().join("ref.md"),
+        "[[old.png]] ![[old.png]] [note](old.png) ![image](old.png)",
+    )
+    .unwrap();
+    let id = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    service.rename_image(&id, "old.png", "new.png").unwrap();
+    assert_eq!(
+        fs::read_to_string(root.path().join("ref.md")).unwrap(),
+        "[[old.png]] ![[new.png]] [note](old.png) ![image](new.png)"
+    );
+}
+
+#[test]
+fn image_rename_rewrites_markdown_images_with_nested_and_code_alt_text() {
+    let (_config, service) = service();
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("old.png"), b"pixels").unwrap();
+    fs::write(
+        root.path().join("ref.md"),
+        "![diagram [v1]](old.png) ![diagram `[v1]`](old.png)",
+    )
+    .unwrap();
+    let id = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    service.rename_image(&id, "old.png", "new.png").unwrap();
+    assert_eq!(
+        fs::read_to_string(root.path().join("ref.md")).unwrap(),
+        "![diagram [v1]](new.png) ![diagram `[v1]`](new.png)"
+    );
+}
+
+#[test]
+fn image_rename_rewrites_nested_image_destinations_without_offset_corruption() {
+    let (_config, service) = service();
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("old.png"), b"pixels").unwrap();
+    fs::write(root.path().join("ref.md"), "![![inner](old.png)](old.png)").unwrap();
+    let id = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    service
+        .rename_image(&id, "old.png", "renamed-long.png")
+        .unwrap();
+    assert_eq!(
+        fs::read_to_string(root.path().join("ref.md")).unwrap(),
+        "![![inner](renamed-long.png)](renamed-long.png)"
+    );
+}
+
+#[test]
+fn note_rename_keeps_image_syntax_untouched() {
+    let (_config, service) = service();
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("a.md"), "# A").unwrap();
+    fs::write(
+        root.path().join("ref.md"),
+        "![[a]] [[a]] ![image](a.md) [note](a.md)",
+    )
+    .unwrap();
+    let id = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    let note = service.read_note(&id, "a.md").unwrap();
+    service
+        .rename_note(&id, "a.md", "b", &note.revision)
+        .unwrap();
+    assert_eq!(
+        fs::read_to_string(root.path().join("ref.md")).unwrap(),
+        "![[a]] [[b]] ![image](a.md) [note](b.md)"
+    );
+}
+
+#[test]
+fn image_rename_rewrites_workspace_root_markdown_image_destination() {
+    let (_config, service) = service();
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("Lectures")).unwrap();
+    fs::write(root.path().join("old.png"), b"pixels").unwrap();
+    fs::write(root.path().join("Lectures/ref.md"), "![figure](/old.png)").unwrap();
+    let id = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    service.rename_image(&id, "old.png", "new.png").unwrap();
+    assert_eq!(
+        fs::read_to_string(root.path().join("Lectures/ref.md")).unwrap(),
+        "![figure](/new.png)"
+    );
+}
+
+#[test]
+fn bare_image_embed_rewrite_prefers_its_own_workspace() {
+    let (_config, service) = service();
+    let first = tempdir().unwrap();
+    let second = tempdir().unwrap();
+    for root in [&first, &second] {
+        fs::write(root.path().join("old.png"), b"pixels").unwrap();
+        fs::write(root.path().join("ref.md"), "![[old.png]]").unwrap();
+    }
+    let first_id = service
+        .add_workspace(first.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    service
+        .add_workspace(second.path().to_str().unwrap())
+        .unwrap();
+    service
+        .rename_image(&first_id, "old.png", "new.png")
+        .unwrap();
+    assert_eq!(
+        fs::read_to_string(first.path().join("ref.md")).unwrap(),
+        "![[new.png]]"
+    );
+    assert_eq!(
+        fs::read_to_string(second.path().join("ref.md")).unwrap(),
+        "![[old.png]]"
+    );
+}
+
+#[test]
+fn note_rename_bare_destination_moves_nested_note_to_workspace_root() {
+    let (_config, service) = service();
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("Lectures")).unwrap();
+    fs::write(root.path().join("Lectures/a.md"), "# A").unwrap();
+    fs::write(
+        root.path().join("ref.md"),
+        "[[/Lectures/a]] [read](Lectures/a.md)",
+    )
+    .unwrap();
+    let id = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    service.save_sessions(serde_json::from_value(serde_json::json!({id.clone(): {"tabs": ["Lectures/a.md"], "primary": "Lectures/a.md", "secondary": null, "split": false}})).unwrap(), Some(id.clone()), true).unwrap();
+    let note = service.read_note(&id, "Lectures/a.md").unwrap();
+    let result = service
+        .rename_note(&id, "Lectures/a.md", "Renamed.md", &note.revision)
+        .unwrap();
+    assert_eq!(result.path, "Renamed.md");
+    assert!(root.path().join("Renamed.md").exists());
+    assert!(!root.path().join("Lectures/a.md").exists());
+    assert_eq!(
+        fs::read_to_string(root.path().join("ref.md")).unwrap(),
+        "[[/Renamed]] [read](Renamed.md)"
+    );
+    let session = &service.load_settings().unwrap().sessions[&id];
+    assert_eq!(session.tabs, ["Renamed.md"]);
+    assert_eq!(session.primary.as_deref(), Some("Renamed.md"));
+}
+
+#[derive(Default)]
+struct FakeTrash(std::sync::Mutex<Vec<std::path::PathBuf>>);
+impl notes_lib::service::Trash for FakeTrash {
+    fn delete(&self, path: &std::path::Path) -> Result<(), String> {
+        self.0.lock().unwrap().push(path.to_path_buf());
+        fs::remove_file(path).map_err(|e| e.to_string())
+    }
+}
+
+#[test]
+fn delete_checks_revision_and_prunes_metadata_after_trash_success() {
+    use notes_lib::model::Appearance;
+    let fake = std::sync::Arc::new(FakeTrash::default());
+    let config = tempdir().unwrap();
+    let service = Service::with_trash(config.path().to_path_buf(), fake.clone()).unwrap();
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("a.md"), "old").unwrap();
+    fs::write(root.path().join("b.png"), b"pixels").unwrap();
+    let id = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    service
+        .set_entry_appearance(
+            &id,
+            "a.md",
+            Appearance {
+                icon: None,
+                color: Some("#123456".into()),
+            },
+        )
+        .unwrap();
+    service.save_sessions(serde_json::from_value(serde_json::json!({id.clone(): {"tabs": ["a.md", "b.png"], "primary": "a.md", "secondary": "b.png", "split": true}})).unwrap(), Some(id.clone()), true).unwrap();
+    let revision = service.read_note(&id, "a.md").unwrap().revision;
+    assert!(service.delete_file(&id, "a.md", None).is_err());
+    assert!(service.delete_file(&id, "a.md", Some("wrong")).is_err());
+    assert!(root.path().join("a.md").exists());
+    service.delete_file(&id, "a.md", Some(&revision)).unwrap();
+    service.delete_file(&id, "b.png", None).unwrap();
+    assert_eq!(fake.0.lock().unwrap().len(), 2);
+    let settings = service.load_settings().unwrap();
+    assert!(settings.appearances.get(&id).is_none_or(|a| a.is_empty()));
+    assert!(settings.sessions[&id].tabs.is_empty());
+    assert!(settings.sessions[&id].primary.is_none());
+    assert!(settings.sessions[&id].secondary.is_none());
+    assert!(!settings.sessions[&id].split);
+    assert!(service.delete_file(&id, "../outside.md", None).is_err());
+}
+
+#[test]
+fn committed_image_rename_and_delete_report_metadata_write_failures() {
+    let fake = std::sync::Arc::new(FakeTrash::default());
+    let config = tempdir().unwrap();
+    let service = Service::with_trash(config.path().to_path_buf(), fake).unwrap();
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("a.png"), b"pixels").unwrap();
+    let id = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    fs::remove_file(config.path().join("notes.json")).unwrap();
+    fs::create_dir(config.path().join("notes.json")).unwrap();
+    let renamed = service.rename_image(&id, "a.png", "b").unwrap();
+    assert_eq!(renamed.path, "b.png");
+    assert!(!renamed.warnings.is_empty());
+    assert!(root.path().join("b.png").exists());
+    let deleted = service.delete_file(&id, "b.png", None).unwrap();
+    assert!(!deleted.warnings.is_empty());
+    assert!(!root.path().join("b.png").exists());
+}
+
+#[test]
+fn failed_workspace_removal_persistence_keeps_registration_and_files() {
+    let (config, service) = service();
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("a.md"), "keep").unwrap();
+    let id = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    fs::remove_file(config.path().join("notes.json")).unwrap();
+    fs::create_dir(config.path().join("notes.json")).unwrap();
+    assert!(service.remove_workspace(&id).is_err());
+    assert_eq!(service.load_settings().unwrap().workspaces[0].id, id);
+    assert_eq!(
+        fs::read_to_string(root.path().join("a.md")).unwrap(),
+        "keep"
+    );
+}
+
+struct RejectTrash;
+impl notes_lib::service::Trash for RejectTrash {
+    fn delete(&self, _path: &std::path::Path) -> Result<(), String> {
+        Err("Trash unavailable".into())
+    }
+}
+
+#[test]
+fn trash_failure_preserves_file_and_metadata() {
+    use notes_lib::model::Appearance;
+    let config = tempdir().unwrap();
+    let service = Service::with_trash(
+        config.path().to_path_buf(),
+        std::sync::Arc::new(RejectTrash),
+    )
+    .unwrap();
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("a.png"), b"pixels").unwrap();
+    let id = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    let appearance = Appearance {
+        icon: None,
+        color: Some("#123456".into()),
+    };
+    service
+        .set_entry_appearance(&id, "a.png", appearance.clone())
+        .unwrap();
+    assert!(service.delete_file(&id, "a.png", None).is_err());
+    assert!(root.path().join("a.png").exists());
+    assert_eq!(
+        service.load_settings().unwrap().appearances[&id]["a.png"],
+        appearance
+    );
+}

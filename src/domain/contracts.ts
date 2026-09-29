@@ -7,6 +7,14 @@ export const workspaceSchema = z.object({
   color: z.string(),
   icon: z.string(),
 });
+export const appearanceSchema = z.object({
+  icon: z.string().nullable(),
+  color: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .nullable(),
+});
+export type Appearance = z.infer<typeof appearanceSchema>;
 export const entrySchema = z.object({
   path: z.string(),
   kind: z.enum(["note", "image", "folder"]),
@@ -34,6 +42,12 @@ export const saveResultSchema = noteSchema.extend({
   rewritten: z.array(rewriteSchema),
   warnings: z.array(z.string()),
 });
+export const imageRenameSchema = z.object({
+  path: z.string(),
+  rewritten: z.array(rewriteSchema),
+  warnings: z.array(z.string()),
+});
+export const deleteResultSchema = z.object({ warnings: z.array(z.string()) });
 export const sessionSchema = z.object({
   tabs: z.array(z.string()),
   primary: z.string().nullable(),
@@ -45,6 +59,9 @@ export const settingsSchema = z.object({
   activeWorkspaceId: z.string().nullable(),
   sessions: z.record(z.string(), sessionSchema),
   toolbarVisible: z.boolean(),
+  appearances: z
+    .record(z.string(), z.record(z.string(), appearanceSchema))
+    .default({}),
 });
 export const imageSchema = z.object({ data: z.string(), mime: z.string() });
 
@@ -73,6 +90,22 @@ export interface FileService {
   ): Promise<void>;
   addWorkspace(path: string): Promise<WorkspaceSnapshot>;
   updateWorkspace(workspace: Workspace): Promise<Workspace>;
+  removeWorkspace(workspaceId: string): Promise<Settings>;
+  setEntryAppearance(
+    workspaceId: string,
+    path: string,
+    appearance: Appearance,
+  ): Promise<Appearance>;
+  renameImage(
+    workspaceId: string,
+    path: string,
+    name: string,
+  ): Promise<z.infer<typeof imageRenameSchema>>;
+  deleteFile(
+    workspaceId: string,
+    path: string,
+    revision: string | null,
+  ): Promise<z.infer<typeof deleteResultSchema>>;
   scanWorkspace(workspaceId: string): Promise<WorkspaceSnapshot>;
   readNote(workspaceId: string, path: string): Promise<NoteFile>;
   createNote(workspaceId: string, folder: string): Promise<NoteFile>;

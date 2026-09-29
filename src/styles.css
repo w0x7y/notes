@@ -1007,3 +1007,22 @@ button[aria-pressed="true"] {
   border: 1px solid #4b5263;
   min-width: 145px;
 }
+
+/* File appearance and destructive actions share the app palette. */
+.appearance-fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.button.danger,
+.menu-item.danger {
+  color: var(--red, #e06c75);
+}
+.button.danger:hover,
+.menu-item.danger:hover {
+  background: #e06c7514;
+}
+.remove-workspace {
+  margin-right: auto;
+}

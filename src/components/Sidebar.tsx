@@ -1,8 +1,5 @@
 import { useState, type MouseEvent } from "react";
 import {
-  BookOpen,
-  Braces,
-  Briefcase,
   ChevronDown,
   ChevronRight,
   FilePlus2,
@@ -10,15 +7,16 @@ import {
   PanelsLeftRight,
   PencilLine,
   FileText,
-  Folder,
-  FolderOpen,
   FolderPlus,
+  FolderOpen,
   Hash,
-  Image,
+  Palette,
+  Trash2,
   Search,
   Settings2,
 } from "lucide-react";
-import type { Entry, Workspace } from "../domain/contracts";
+import { ItemIcon } from "./ItemIcon";
+import type { Appearance, Entry, Workspace } from "../domain/contracts";
 import { MenuButton, PopupMenu, type MenuAnchor } from "./PopupMenu";
 import { run } from "../domain/app-store";
 import { copyText } from "../platform";
@@ -31,25 +29,22 @@ export function WorkspaceIcon({
   icon: string;
   size?: number;
 }) {
-  return icon === "code" ? (
-    <Braces size={size} />
-  ) : icon === "work" ? (
-    <Briefcase size={size} />
-  ) : (
-    <BookOpen size={size} />
-  );
+  return <ItemIcon name={icon} fallback="workspace" size={size} />;
 }
 
 type Props = {
   workspaces: Workspace[];
   workspace: Workspace | undefined;
   entries: Entry[];
+  appearances: Record<string, Appearance>;
   active: string | null;
   selectedFolder: string;
   onFolder: (path: string) => void;
   onOpen: (path: string) => void;
   onOpenSplit: (path: string) => void;
   onRename: (path: string) => void;
+  onAppearance: (path: string) => void;
+  onDelete: (path: string) => void;
   onWorkspace: (id: string) => void;
   onAddWorkspace: () => void;
   onSettings: () => void;
@@ -64,7 +59,7 @@ function FolderNode({
   ...props
 }: { path: string; entries: Entry[] } & Pick<
   Props,
-  "active" | "selectedFolder" | "onFolder" | "onOpen"
+  "active" | "selectedFolder" | "onFolder" | "onOpen" | "appearances"
 > & {
     onContextMenu: (event: MouseEvent<HTMLButtonElement>, entry: Entry) => void;
   }) {
@@ -82,6 +77,7 @@ function FolderNode({
           <FolderBranch
             key={entry.path}
             path={entry.path}
+            entry={entry}
             entries={entries}
             {...props}
           />
@@ -94,12 +90,19 @@ function FolderNode({
             title={entry.path}
             aria-current={props.active === entry.path ? "page" : undefined}
           >
-            {entry.kind === "image" ? (
-              <Image size={16} />
-            ) : (
-              <FileText size={16} />
-            )}
-            <span dir="auto">{basename(entry.path)}</span>
+            <ItemIcon
+              name={props.appearances[entry.path]?.icon}
+              fallback={entry.kind === "image" ? "image" : "file"}
+              size={16}
+            />
+            <span
+              dir="auto"
+              style={{
+                color: props.appearances[entry.path]?.color ?? undefined,
+              }}
+            >
+              {basename(entry.path)}
+            </span>
           </button>
         ),
       )}
@@ -108,9 +111,9 @@ function FolderNode({
 }
 
 function FolderBranch(
-  props: { path: string; entries: Entry[] } & Pick<
+  props: { path: string; entries: Entry[]; entry: Entry } & Pick<
     Props,
-    "active" | "selectedFolder" | "onFolder" | "onOpen"
+    "active" | "selectedFolder" | "onFolder" | "onOpen" | "appearances"
   > & {
       onContextMenu: (
         event: MouseEvent<HTMLButtonElement>,
@@ -128,12 +131,22 @@ function FolderBranch(
           props.onFolder(props.path);
         }}
         aria-expanded={open}
+        onContextMenu={(event) => props.onContextMenu(event, props.entry)}
       >
         <span className="chevron">
           {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
         </span>
-        {open ? <FolderOpen size={16} /> : <Folder size={16} />}
-        <span>{basename(props.path)}</span>
+        <ItemIcon
+          name={props.appearances[props.path]?.icon}
+          fallback={open ? "folder-open" : "folder"}
+          size={16}
+        />
+        <span
+          dir="auto"
+          style={{ color: props.appearances[props.path]?.color ?? undefined }}
+        >
+          {basename(props.path)}
+        </span>
       </button>
       {open && <FolderNode {...props} />}
     </div>
@@ -229,6 +242,7 @@ export function Sidebar(props: Props) {
             key={props.workspace?.id}
             path=""
             entries={props.entries}
+            appearances={props.appearances}
             active={props.active}
             selectedFolder={props.selectedFolder}
             onFolder={props.onFolder}
@@ -277,20 +291,20 @@ export function Sidebar(props: Props) {
           anchor={context.anchor}
           onClose={() => setContext(null)}
           actions={[
-            {
-              id: "open",
-              label: "Open",
-              icon: <FileText size={15} />,
-              onSelect: () => props.onOpen(context.entry.path),
-            },
-            {
-              id: "split",
-              label: "Open in split pane",
-              icon: <PanelsLeftRight size={15} />,
-              onSelect: () => props.onOpenSplit(context.entry.path),
-            },
-            ...(context.entry.kind === "note"
+            ...(context.entry.kind !== "folder"
               ? [
+                  {
+                    id: "open",
+                    label: "Open",
+                    icon: <FileText size={15} />,
+                    onSelect: () => props.onOpen(context.entry.path),
+                  },
+                  {
+                    id: "split",
+                    label: "Open in split pane",
+                    icon: <PanelsLeftRight size={15} />,
+                    onSelect: () => props.onOpenSplit(context.entry.path),
+                  },
                   {
                     id: "rename",
                     label: "Rename or move…",
@@ -299,6 +313,12 @@ export function Sidebar(props: Props) {
                   },
                 ]
               : []),
+            {
+              id: "appearance",
+              label: "Icon and color…",
+              icon: <Palette size={15} />,
+              onSelect: () => props.onAppearance(context.entry.path),
+            },
             {
               id: "copy",
               label: "Copy path",
@@ -312,6 +332,17 @@ export function Sidebar(props: Props) {
                   ),
                 ),
             },
+            ...(context.entry.kind !== "folder"
+              ? [
+                  {
+                    id: "delete",
+                    label: "Delete…",
+                    danger: true,
+                    icon: <Trash2 size={15} />,
+                    onSelect: () => props.onDelete(context.entry.path),
+                  },
+                ]
+              : []),
           ]}
         />
       )}

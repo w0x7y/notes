@@ -3,7 +3,10 @@ pub mod model;
 pub mod pathing;
 pub mod service;
 
-use model::{NoteFile, SaveResult, Session, Settings, Snapshot, Workspace};
+use model::{
+    Appearance, DeleteResult, NoteFile, RenameImageResult, SaveResult, Session, Settings, Snapshot,
+    Workspace,
+};
 use service::{ImageData, Service};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -56,6 +59,25 @@ async fn update_workspace(
     .await
 }
 #[tauri::command]
+async fn set_entry_appearance(
+    service: tauri::State<'_, Arc<Service>>,
+    workspace_id: String,
+    path: String,
+    appearance: Appearance,
+) -> Result<Appearance, String> {
+    work(service, move |s| {
+        s.set_entry_appearance(&workspace_id, &path, appearance)
+    })
+    .await
+}
+#[tauri::command]
+async fn remove_workspace(
+    service: tauri::State<'_, Arc<Service>>,
+    workspace_id: String,
+) -> Result<Settings, String> {
+    work(service, move |s| s.remove_workspace(&workspace_id)).await
+}
+#[tauri::command]
 async fn scan_workspace(
     service: tauri::State<'_, Arc<Service>>,
     workspace_id: String,
@@ -105,6 +127,30 @@ async fn rename_note(
     .await
 }
 #[tauri::command]
+async fn rename_image(
+    service: tauri::State<'_, Arc<Service>>,
+    workspace_id: String,
+    path: String,
+    name: String,
+) -> Result<RenameImageResult, String> {
+    work(service, move |s| {
+        s.rename_image(&workspace_id, &path, &name)
+    })
+    .await
+}
+#[tauri::command]
+async fn delete_file(
+    service: tauri::State<'_, Arc<Service>>,
+    workspace_id: String,
+    path: String,
+    revision: Option<String>,
+) -> Result<DeleteResult, String> {
+    work(service, move |s| {
+        s.delete_file(&workspace_id, &path, revision.as_deref())
+    })
+    .await
+}
+#[tauri::command]
 async fn create_folder(
     service: tauri::State<'_, Arc<Service>>,
     workspace_id: String,
@@ -142,11 +188,15 @@ pub fn run() {
             save_sessions,
             add_workspace,
             update_workspace,
+            set_entry_appearance,
+            remove_workspace,
             scan_workspace,
             read_note,
             create_note,
             save_note,
             rename_note,
+            rename_image,
+            delete_file,
             create_folder,
             read_image
         ])

@@ -1,6 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
 import {
+  appearanceSchema,
+  deleteResultSchema,
+  imageRenameSchema,
   imageSchema,
   noteSchema,
   saveResultSchema,
@@ -20,6 +23,18 @@ async function call<T>(
 
 export const nativeFiles: FileService = {
   kind: "native",
+  removeWorkspace: (workspaceId) =>
+    call("remove_workspace", { workspaceId }, settingsSchema),
+  setEntryAppearance: (workspaceId, path, appearance) =>
+    call(
+      "set_entry_appearance",
+      { workspaceId, path, appearance },
+      appearanceSchema,
+    ),
+  renameImage: (workspaceId, path, name) =>
+    call("rename_image", { workspaceId, path, name }, imageRenameSchema),
+  deleteFile: (workspaceId, path, revision) =>
+    call("delete_file", { workspaceId, path, revision }, deleteResultSchema),
   loadSettings: () => call("load_settings", {}, settingsSchema),
   saveSessions: (settings) => invoke("save_sessions", settings),
   addWorkspace: (path) => call("add_workspace", { path }, snapshotSchema),

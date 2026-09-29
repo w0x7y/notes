@@ -6,6 +6,7 @@ export type MenuAction = {
   label: string;
   icon?: ReactNode;
   selected?: boolean;
+  danger?: boolean;
   onSelect: () => void;
 };
 export type MenuAnchor = {
@@ -105,7 +106,7 @@ export function PopupMenu({
         <button
           key={action.id}
           type="button"
-          className="menu-item"
+          className={`menu-item ${action.danger ? "danger" : ""}`}
           role={action.selected === undefined ? "menuitem" : "menuitemradio"}
           aria-checked={action.selected}
           onClick={() => {

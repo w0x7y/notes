@@ -3,7 +3,6 @@ import {
   BookOpen,
   FileText,
   FolderOpen,
-  Image,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightClose,
@@ -14,6 +13,8 @@ import {
 import { Sidebar } from "./components/Sidebar";
 import { SearchDialog } from "./components/SearchDialog";
 import { TextDialog, WorkspaceDialog } from "./components/Forms";
+import { AppearanceDialog, ConfirmDialog } from "./components/FileDialogs";
+import { ItemIcon } from "./components/ItemIcon";
 import { NotePane } from "./components/NotePane";
 import { SaveStatus } from "./components/SaveStatus";
 import { ImagePane } from "./components/ImagePane";
@@ -22,6 +23,10 @@ import {
   addWorkspace,
   changeSession,
   closeFile,
+  deleteEntry,
+  renameImage,
+  removeWorkspace,
+  setEntryAppearance,
   currentSession,
   emptySession,
   flushAll,
@@ -46,6 +51,16 @@ type Modal =
   | { kind: "folder" }
   | { kind: "workspace" }
   | { kind: "rename"; document: NoteDocument }
+  | { kind: "rename-image"; id: string; path: string }
+  | { kind: "appearance"; id: string; path: string; document?: NoteDocument }
+  | {
+      kind: "delete";
+      id: string;
+      path: string;
+      entryKind: "note" | "image";
+      document?: NoteDocument;
+    }
+  | { kind: "remove-workspace"; id: string; name: string; path: string }
   | null;
 
 export default function App() {
@@ -62,6 +77,7 @@ export default function App() {
     state.focusedPane === "secondary" && session.split
       ? session.secondary
       : session.primary;
+  const appearances = state.appearances[workspace?.id ?? ""] ?? {};
   const closeModal = () => setModal(null);
 
   const openFolder = useCallback(async () => {
@@ -94,6 +110,10 @@ export default function App() {
   useEffect(() => {
     const keyboard = (event: KeyboardEvent) => {
       if (!event.ctrlKey && !event.metaKey) return;
+      if (document.querySelector('dialog[aria-busy="true"]')) {
+        event.preventDefault();
+        return;
+      }
       const current = useApp.getState();
       const id = current.activeWorkspaceId;
       const value = currentSession();
@@ -245,6 +265,7 @@ export default function App() {
           workspaces={state.workspaces}
           workspace={workspace}
           entries={entries}
+          appearances={appearances}
           active={focusedPath}
           selectedFolder={selectedFolder}
           onFolder={setSelectedFolder}
@@ -269,12 +290,58 @@ export default function App() {
             useApp.setState({ focusedPane: "secondary" });
           }}
           onRename={(path) => {
+            if (
+              workspace &&
+              entries.find((entry) => entry.path === path)?.kind === "image"
+            ) {
+              setModal({ kind: "rename-image", id: workspace.id, path });
+              return;
+            }
             if (workspace)
               run(
                 loadDocument(workspace.id, path).then((document) =>
                   setModal({ kind: "rename", document }),
                 ),
               );
+          }}
+          onAppearance={(path) => {
+            if (!workspace) return;
+            const entry = entries.find((entry) => entry.path === path);
+            if (entry?.kind === "note")
+              run(
+                loadDocument(workspace.id, path).then((document) =>
+                  setModal({
+                    kind: "appearance",
+                    id: workspace.id,
+                    path,
+                    document,
+                  }),
+                ),
+              );
+            else setModal({ kind: "appearance", id: workspace.id, path });
+          }}
+          onDelete={(path) => {
+            if (!workspace) return;
+            const entry = entries.find((entry) => entry.path === path);
+            if (entry?.kind === "note")
+              run(
+                loadDocument(workspace.id, path).then((document) =>
+                  setModal({
+                    kind: "delete",
+                    id: workspace.id,
+                    path,
+                    entryKind: "note",
+                    document,
+                  }),
+                ),
+              );
+            else if (entry?.kind === "image")
+              setModal({
+                kind: "delete",
+                id: workspace.id,
+                path,
+                entryKind: "image",
+              });
           }}
           onWorkspace={switchWorkspace}
           onAddWorkspace={() => run(openFolder())}
@@ -304,6 +371,15 @@ export default function App() {
               <div
                 className={`tab ${focusedPath === path ? "active" : ""}`}
                 key={path}
+                onMouseDown={(event) => {
+                  if (event.button === 1) event.preventDefault();
+                }}
+                onAuxClick={(event) => {
+                  if (event.button === 1) {
+                    event.preventDefault();
+                    if (workspace) run(closeFile(workspace.id, path));
+                  }
+                }}
               >
                 <button
                   className="tab-label"
@@ -313,13 +389,22 @@ export default function App() {
                     if (workspace) openFile(workspace.id, path);
                   }}
                 >
-                  {entries.find((entry) => entry.path === path)?.kind ===
-                  "image" ? (
-                    <Image size={14} />
-                  ) : (
-                    <FileText size={14} />
-                  )}
-                  <span dir="auto">{basename(path)}</span>
+                  <ItemIcon
+                    name={appearances[path]?.icon}
+                    size={14}
+                    fallback={
+                      entries.find((entry) => entry.path === path)?.kind ===
+                      "image"
+                        ? "image"
+                        : "file"
+                    }
+                  />
+                  <span
+                    dir="auto"
+                    style={{ color: appearances[path]?.color ?? undefined }}
+                  >
+                    {basename(path)}
+                  </span>
                 </button>
                 <button
                   className="close-tab"
@@ -425,6 +510,14 @@ export default function App() {
         <WorkspaceDialog
           workspace={workspace}
           onSubmit={updateWorkspace}
+          onRemove={() =>
+            setModal({
+              kind: "remove-workspace",
+              id: workspace.id,
+              name: workspace.name,
+              path: workspace.path,
+            })
+          }
           onClose={closeModal}
         />
       )}
@@ -439,6 +532,60 @@ export default function App() {
             await files.createFolder(workspace.id, selectedFolder, name);
             await refreshWorkspace(workspace.id);
           }}
+        />
+      )}
+      {modal?.kind === "appearance" && (
+        <AppearanceDialog
+          path={modal.path}
+          initial={
+            state.appearances[modal.id]?.[
+              modal.document?.getSnapshot().path ?? modal.path
+            ] ?? {
+              icon: null,
+              color: null,
+            }
+          }
+          onSubmit={(appearance) =>
+            setEntryAppearance(modal.id, modal.path, appearance, modal.document)
+          }
+          onClose={closeModal}
+        />
+      )}
+      {modal?.kind === "rename-image" && (
+        <TextDialog
+          title="Rename or move image"
+          label="Path inside this workspace"
+          initial={modal.path}
+          hint="Use an existing folder to move this image. Keep the image extension; existing image links will be updated where they can be resolved."
+          submitLabel="Rename image"
+          onClose={closeModal}
+          onSubmit={(name) => renameImage(modal.id, modal.path, name)}
+        />
+      )}
+      {modal?.kind === "delete" && (
+        <ConfirmDialog
+          title="Delete file?"
+          description={
+            files.kind === "demo"
+              ? "Remove this file from the demo?"
+              : "Move this file to Trash? You can restore it using your file manager."
+          }
+          detail={modal.path}
+          submitLabel="Delete file"
+          onClose={closeModal}
+          onConfirm={() =>
+            deleteEntry(modal.id, modal.path, modal.entryKind, modal.document)
+          }
+        />
+      )}
+      {modal?.kind === "remove-workspace" && (
+        <ConfirmDialog
+          title={`Remove ${modal.name}?`}
+          description="Remove this workspace from the app. Its folder and files will stay on disk, and you can open it again later."
+          detail={modal.path}
+          submitLabel="Remove workspace"
+          onClose={closeModal}
+          onConfirm={() => removeWorkspace(modal.id)}
         />
       )}
       {modal?.kind === "rename" && (

@@ -29,6 +29,7 @@ pathdiff = "0.2"
 libc = "0.2"
 percent-encoding = "2"
 pulldown-cmark = "0.13"
+trash = "5.2"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

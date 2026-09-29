@@ -1,5 +1,5 @@
 use percent_encoding::{percent_decode_str, utf8_percent_encode, AsciiSet, CONTROLS};
-use pulldown_cmark::{Event, Parser, Tag};
+use pulldown_cmark::{Event, LinkType, Parser, Tag};
 use regex::{Captures, Regex};
 use std::path::Path;
 use std::sync::LazyLock;
@@ -7,7 +7,7 @@ use std::sync::LazyLock;
 static TAG: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?:^|[^\p{L}\p{N}_])#([\p{L}\p{N}_/-]+)").unwrap());
 static WIKI: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\[\[([^\]|#]+)(#[^\]|]*)?(\|[^\]]*)?\]\]").unwrap());
+    LazyLock::new(|| Regex::new(r"(!?)\[\[([^\]|#]+)(#[^\]|]*)?(\|[^\]]*)?\]\]").unwrap());
 static LINK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\]\(([^)\s]+)(\s+[^)]*)?\)").unwrap());
 const LINK_PATH: &AsciiSet = &CONTROLS
     .add(b' ')
@@ -158,6 +158,7 @@ pub struct LinkRewrite<'a> {
     pub unique_basename: bool,
     pub bare_destination: &'a str,
     pub qualified_destination: &'a str,
+    pub image: bool,
 }
 
 pub fn rewrite_links(content: &str, rewrite: &LinkRewrite<'_>) -> String {
@@ -171,21 +172,36 @@ pub fn rewrite_links(content: &str, rewrite: &LinkRewrite<'_>) -> String {
         unique_basename,
         bare_destination,
         qualified_destination,
+        image,
     } = rewrite;
-    visible_segments(content, |text| {
-        let wiki = WIKI.replace_all(text, |caps: &Captures| {
-            let destination = &caps[1];
-            let stem = old.file_stem().unwrap_or_default().to_string_lossy();
+    let wiki = visible_segments(content, |text| {
+        WIKI.replace_all(text, |caps: &Captures| {
+            let embed = &caps[1] == "!";
+            if embed != *image {
+                return caps[0].to_string();
+            }
+            let destination = &caps[2];
+            let bare_old = if *image {
+                old.file_name()
+            } else {
+                old.file_stem()
+            }
+            .unwrap_or_default()
+            .to_string_lossy();
+            let candidate = |path: &str| {
+                if *image {
+                    path.to_string()
+                } else {
+                    format!("{path}.md")
+                }
+            };
             let (match_target, qualified) = if let Some(root_path) = destination.strip_prefix('/') {
-                (
-                    path_eq(&source_root.join(format!("{root_path}.md")), old),
-                    true,
-                )
+                (path_eq(&source_root.join(candidate(root_path)), old), true)
             } else if let Some((id, root_path)) = destination.split_once(':') {
                 if id == *target_workspace_id {
                     (
                         path_eq(
-                            &target_root.join(format!("{}.md", root_path.trim_start_matches('/'))),
+                            &target_root.join(candidate(root_path.trim_start_matches('/'))),
                             old,
                         ),
                         true,
@@ -193,10 +209,30 @@ pub fn rewrite_links(content: &str, rewrite: &LinkRewrite<'_>) -> String {
                 } else {
                     (false, true)
                 }
-            } else if destination == stem.as_ref() {
-                (*unique_basename, false)
+            } else if destination == bare_old.as_ref() {
+                if *image {
+                    let relative = source
+                        .parent()
+                        .unwrap_or(source_root)
+                        .join(candidate(destination));
+                    let root = source_root.join(candidate(destination));
+                    let matches = if path_eq(&relative, old) {
+                        true
+                    } else if relative.exists() {
+                        false
+                    } else if path_eq(&root, old) {
+                        true
+                    } else if root.exists() {
+                        false
+                    } else {
+                        *unique_basename
+                    };
+                    (matches, false)
+                } else {
+                    (*unique_basename, false)
+                }
             } else {
-                let relative = format!("{destination}.md");
+                let relative = candidate(destination);
                 (
                     path_eq(&source.parent().unwrap_or(source_root).join(&relative), old)
                         || path_eq(&source_root.join(&relative), old),
@@ -212,34 +248,72 @@ pub fn rewrite_links(content: &str, rewrite: &LinkRewrite<'_>) -> String {
                 bare_destination.to_string()
             };
             format!(
-                "[[{}{}{}]]",
+                "{}[[{}{}{}]]",
+                &caps[1],
                 replacement,
-                caps.get(2).map_or("", |m| m.as_str()),
-                caps.get(3).map_or("", |m| m.as_str())
+                caps.get(3).map_or("", |m| m.as_str()),
+                caps.get(4).map_or("", |m| m.as_str())
             )
-        });
-        LINK.replace_all(&wiki, |caps: &Captures| {
+        })
+        .to_string()
+    });
+    let mut replacements = Vec::new();
+    for (event, range) in Parser::new(&wiki).into_offset_iter() {
+        let is_image_link = match event {
+            Event::Start(Tag::Image {
+                link_type: LinkType::Inline,
+                ..
+            }) => true,
+            Event::Start(Tag::Link {
+                link_type: LinkType::Inline,
+                ..
+            }) => false,
+            _ => continue,
+        };
+        if is_image_link != *image {
+            continue;
+        }
+        let Some(caps) = LINK.captures_iter(&wiki[range.clone()]).last() else {
+            continue;
+        };
+        let Some(matched) = caps.get(0) else {
+            continue;
+        };
+        let replacement = {
             let destination = &caps[1];
             let (path, fragment) = destination
                 .split_once('#')
                 .map_or((destination, ""), |(a, b)| (a, b));
             let decoded = percent_decode_str(path).decode_utf8();
             let Ok(decoded) = decoded else {
-                return caps[0].to_string();
+                continue;
             };
-            if !path_eq(
-                &source
+            let root_relative = decoded.starts_with('/');
+            let candidate = if root_relative {
+                source_root.join(decoded.trim_start_matches('/'))
+            } else {
+                source
                     .parent()
                     .unwrap_or(source_root)
-                    .join(decoded.as_ref()),
-                old,
-            ) {
-                return caps[0].to_string();
+                    .join(decoded.as_ref())
+            };
+            if !path_eq(&candidate, old) {
+                continue;
             }
-            let relative = pathdiff::diff_paths(new, source.parent().unwrap_or(source_root))
-                .unwrap_or_default()
-                .to_string_lossy()
-                .replace('\\', "/");
+            let relative = if root_relative {
+                format!(
+                    "/{}",
+                    new.strip_prefix(source_root)
+                        .unwrap_or(new)
+                        .to_string_lossy()
+                        .replace('\\', "/")
+                )
+            } else {
+                pathdiff::diff_paths(new, source.parent().unwrap_or(source_root))
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            };
             let fragment = if fragment.is_empty() {
                 String::new()
             } else {
@@ -250,7 +324,18 @@ pub fn rewrite_links(content: &str, rewrite: &LinkRewrite<'_>) -> String {
                 "]({encoded}{fragment}{})",
                 caps.get(2).map_or("", |m| m.as_str())
             )
-        })
-        .to_string()
-    })
+        };
+        replacements.push((
+            range.start + matched.start(),
+            range.start + matched.end(),
+            replacement,
+        ));
+    }
+    let mut result = wiki;
+    replacements.sort_unstable_by_key(|(start, _, _)| *start);
+    replacements.dedup_by_key(|(start, _, _)| *start);
+    for (start, end, replacement) in replacements.into_iter().rev() {
+        result.replace_range(start..end, &replacement);
+    }
+    result
 }

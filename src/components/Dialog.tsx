@@ -6,11 +6,15 @@ export function Dialog({
   onClose,
   children,
   className = "",
+  dismissible = true,
+  busy = false,
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
   className?: string;
+  dismissible?: boolean;
+  busy?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -35,10 +39,11 @@ export function Dialog({
   return (
     <dialog
       ref={ref}
+      aria-busy={busy}
       className={`dialog ${className}`}
       onCancel={(event) => {
         event.preventDefault();
-        onClose();
+        if (dismissible) onClose();
       }}
       onClick={(event) => {
         if (event.target === event.currentTarget) {
@@ -49,7 +54,7 @@ export function Dialog({
             event.clientY < box.top ||
             event.clientY > box.bottom
           )
-            onClose();
+            if (dismissible) onClose();
         }
       }}
     >
@@ -58,6 +63,7 @@ export function Dialog({
         <button
           className="icon-button"
           aria-label="Close dialog"
+          disabled={!dismissible}
           onClick={onClose}
         >
           <X size={17} />
