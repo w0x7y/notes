@@ -16,6 +16,7 @@ type Settings = { workspaces: Workspace[]; activeWorkspaceId: string | null; ses
 Commands (argument names are the exact frontend invoke object keys):
 
 - `load_settings({}) -> Settings`
+- `save_preferences({preferences}) -> Preferences` persists validated app preferences, including `graphBundling` as a finite number from 0 to 1 with a default of 0.85. Older configs receive the default; invalid values and failed config writes retain previous preferences. Graph display settings never alter note files.
 - `save_sessions({sessions, activeWorkspaceId, toolbarVisible}) -> void`
 - `add_workspace({path}) -> Snapshot` (canonicalize, deduplicate; generate ID and initial name/color/book icon)
 - `update_workspace({workspaceId,name,color,icon}) -> Workspace`

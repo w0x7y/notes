@@ -130,6 +130,7 @@ pub struct Preferences {
     pub restore_session: bool,
     pub refresh_on_focus: bool,
     pub sort_files_by: SortFilesBy,
+    pub graph_bundling: f64,
 }
 
 impl Default for Preferences {
@@ -155,12 +156,16 @@ impl Default for Preferences {
             restore_session: true,
             refresh_on_focus: true,
             sort_files_by: SortFilesBy::Name,
+            graph_bundling: 0.85,
         }
     }
 }
 
 impl Preferences {
     pub fn validate(&self) -> Result<(), String> {
+        if !self.graph_bundling.is_finite() || !(0.0..=1.0).contains(&self.graph_bundling) {
+            return Err("Graph bundling strength must be between 0 and 1".into());
+        }
         if self.custom_font.encode_utf16().count() > 100
             || self
                 .custom_font

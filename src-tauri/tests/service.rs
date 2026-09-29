@@ -1504,7 +1504,8 @@ fn old_settings_receive_complete_preference_defaults() {
             "defaultPreview":false,"autosaveDelayMs":600,"searchScope":"all",
             "currentWorkspaceFirst":true,"searchLimit":60,"restoreSession":true,
             "refreshOnFocus":true,"sortFilesBy":"name",
-            "customFont":"","fontWeight":400,"letterSpacing":0.0,"noteWidth":940
+            "customFont":"","fontWeight":400,"letterSpacing":0.0,"noteWidth":940,
+            "graphBundling":0.85
         })
     );
 }
@@ -1522,6 +1523,7 @@ fn preferences_persist_and_missing_fields_use_defaults() {
     .unwrap();
     assert!(preferences.line_wrapping);
     assert!(preferences.restore_session);
+    assert_eq!(preferences.graph_bundling, 0.85);
     assert_eq!(
         service.save_preferences(preferences.clone()).unwrap(),
         preferences
@@ -1529,6 +1531,41 @@ fn preferences_persist_and_missing_fields_use_defaults() {
     drop(service);
     let restarted = Service::new(config.path().to_path_buf()).unwrap();
     assert_eq!(restarted.load_settings().unwrap().preferences, preferences);
+}
+
+#[test]
+fn graph_bundling_persists_and_rejects_invalid_values() {
+    use notes_lib::model::Preferences;
+    let (config, service) = service();
+    for strength in [0.0, 0.4, 0.85, 1.0] {
+        service
+            .save_preferences(Preferences {
+                graph_bundling: strength,
+                ..Preferences::default()
+            })
+            .unwrap();
+        let restarted = Service::new(config.path().to_path_buf()).unwrap();
+        assert_eq!(
+            restarted
+                .load_settings()
+                .unwrap()
+                .preferences
+                .graph_bundling,
+            strength
+        );
+    }
+    for strength in [-0.01, 1.01, f64::INFINITY, f64::NAN] {
+        assert!(service
+            .save_preferences(Preferences {
+                graph_bundling: strength,
+                ..Preferences::default()
+            })
+            .is_err());
+    }
+    assert_eq!(
+        service.load_settings().unwrap().preferences.graph_bundling,
+        1.0
+    );
 }
 
 #[test]

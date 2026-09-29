@@ -18,6 +18,18 @@ The panel button beside Drawing opens the outline, properties and backlinks. The
 
 Type / at the start of a line for Markdown insertions: headings, checklist, list, table, fenced code and quote. Menus do not appear inside code blocks.
 
+## Note graph
+
+Tools → Note graph or Ctrl+K → Open note graph opens a circular hierarchical edge-bundling view. The graph loads on demand and reads content through the existing analysis cache. Workspaces and nested folders determine the hierarchy; lines represent resolvable wiki links and internal Markdown links. Repeated links to a note share one directed edge, and same-note heading links do not create loops. Images and external URLs are excluded. Missing/ambiguous note targets are counted as unresolved links; failed reads show an incomplete-connections warning while their notes remain visible.
+
+Choose the current workspace or all workspaces. Search titles, paths, and workspace names without changing note positions or reading files again. Select a node or note in the list to inspect its connections. Blue links go out of the selected note and green links come in. Incoming/outgoing rows open their source/target note. Double-click a graph node or use Open note to navigate; Enter on a focused node also opens it. Search supports Arrow Down to reach the note list, whose arrow keys select adjacent notes. Escape closes the graph.
+
+Use zoom controls and drag the background to pan; Reset graph view restores the initial framing. Large collections hide most labels until selection or zooming. Workspace colors identify the groups; hover a group arc for its workspace/folder name.
+
+Settings → Graph contains Bundling strength, from 0% straight links to 100% following shared hierarchy routes. The default is 85%. The preview updates the draft immediately; Save applies and persists it, Cancel discards the draft, and Reset to defaults restores 85% along with other preferences. The graph's settings button opens this category directly. This changes display geometry only and never modifies Markdown files.
+
+Graph scope, selection, zoom, and search last only while the graph is open. Content follows the same save/rename/focus-refresh invalidation rules as backlinks; it is not a filesystem watcher or a graph-history recorder. Native persistence checks use temporary config directories. Browser interactions use temporary demo notes.
+
 ## Tasks and projects
 
 Tools → Workspace tasks opens a workspace list of actual Markdown checkboxes. Filter open/completed/all tasks or text. Checkbox changes update the source note through its normal save queue. Clicking a task opens its source line. Code examples and Templates/ are excluded.

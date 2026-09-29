@@ -46,3 +46,22 @@ A separate `node scripts/performance.mjs` run on 2026-09-29, after the architect
 | Split a 1 MB note | 0.033 ms | 0.035 ms |
 
 The content-analysis scheduler now limits reads globally across overlapping consumers. Deterministic timer-order tests verify that bulk analysis yields for both uncached and changed live buffers, while a scoped outline updates immediately. Native incoming-link discovery runs once per relocation and writes each changed referring note once. These are structural guarantees and regression results; native relocation speed and end-to-end typing latency have not been benchmarked for this refactor.
+
+## Hierarchical note graph
+
+Measured locally with Node 26.10.0 on 2026-09-30 using `node scripts/graph-performance.mjs`. Each fixture has 50 folders and one outgoing link per note. The script exercises the actual graph implementation, warms up twice, then measures ten runs; it also checks the resulting edge count and SVG paths.
+
+| Workload | Median | p95 |
+| --- | ---: | ---: |
+| Hierarchy and resolver index, 500 notes | 1.195 ms | 1.902 ms |
+| Resolve 500 links | 1.075 ms | 3.050 ms |
+| Generate 500 bundled SVG paths | 1.609 ms | 2.857 ms |
+| Complete graph calculation, 500 notes | 4.116 ms | 6.534 ms |
+| Hierarchy and resolver index, 5,000 notes | 9.610 ms | 10.497 ms |
+| Resolve 5,000 links | 11.678 ms | 13.824 ms |
+| Generate 5,000 bundled SVG paths | 16.255 ms | 18.623 ms |
+| Complete graph calculation, 5,000 notes | 36.827 ms | 40.025 ms |
+
+These measurements exclude file reads, Markdown analysis, React rendering, frame presentation, and native typing latency. More links increase path generation and rendering work. Graph content analysis is loaded on demand through the existing scheduler. Search and bundling changes reuse the metadata layout and resolver index; changing strength only regenerates paths. Large graphs hide most labels until selecting a note or zooming in.
+
+A separate search/tree sanity run measured title/tag search at 0.052 ms median / 0.114 ms p95 for 500 notes and 0.313 / 0.458 ms for 5,000 notes. Tree preparation measured 0.133 / 0.183 ms and 1.660 / 1.765 ms respectively. These are fresh local measurements, not a before/after comparison.

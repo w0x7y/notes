@@ -9,6 +9,7 @@ import {
   FilePlus2,
   Ellipsis,
   Settings2,
+  Network,
 } from "lucide-react";
 import { MenuButton } from "../components/PopupMenu";
 import { openFile, useApp } from "../domain/app-store";
@@ -21,7 +22,8 @@ export type WorkspaceTool =
   | "projects"
   | "capture"
   | "daily"
-  | "templates";
+  | "templates"
+  | "graph";
 export function WorkspaceTools({
   onTool,
   onSettings,
@@ -71,6 +73,12 @@ export function WorkspaceTools({
                 label: "New from template…",
                 icon: <FilePlus2 size={15} />,
                 onSelect: () => onTool("templates"),
+              },
+              {
+                id: "graph",
+                label: "Note graph",
+                icon: <Network size={15} />,
+                onSelect: () => onTool("graph"),
               },
               {
                 id: "tasks",

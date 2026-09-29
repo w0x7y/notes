@@ -37,6 +37,7 @@ On NVIDIA/Wayland, startup applies `__NV_DISABLE_EXPLICIT_SYNC=1` unless explici
 - Global fuzzy title/tag search, with the current workspace first. Combine terms, such as `vector #exam`.
 - Full-text search with matching snippets, workspace/folder/tag filters, and saved searches.
 - Note/heading autocomplete, backlinks, heading outline, pinned notes, and Markdown slash commands.
+- Hierarchical note graph from workspace tools or the command palette. Circular links bundle through workspace/folder groups; inspect incoming/outgoing connections, search notes, switch scope, zoom/pan, and open a note. Settings → Graph adjusts bundling strength with a visual preview.
 - Command palette, quick capture and daily notes in a dedicated Quick Notes workspace.
 - Editable Markdown starter templates, workspace task overview, and YAML properties with table/board views. See [workflow details](docs/note-workflows.md).
 - Lightweight drawings with editable source and portable SVG previews. See [drawing controls and storage](docs/drawings.md).
@@ -103,4 +104,4 @@ Earlier baseline verification on 2026-09-29 (new workflow checks are documented 
 
 This project is licensed under the [MIT License](LICENSE).
 
-Lucide and its Feather-derived icon license notices are included in `public/THIRD_PARTY_NOTICES.txt`, which is embedded in the desktop frontend build.
+Lucide, its Feather-derived icons, and D3 graph modules have license notices in `public/THIRD_PARTY_NOTICES.txt`, which is embedded in the desktop frontend build.

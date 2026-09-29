@@ -31,6 +31,7 @@ A student and developer replacing their Obsidian workflow with a focused, keyboa
 - Raw Markdown is the default. Editable preview reveals the active paragraph's source.
 - English interface, mixed Hebrew and English notes, automatic direction per paragraph, left-to-right code.
 - Basic Markdown, task lists, syntax-highlighted code, tables, math, images, and wiki links.
+- Note graph groups Markdown notes by workspace and nested folders, using circular hierarchical edge bundling for actual wiki/Markdown links. It supports current/all workspace scope, note search, incoming/outgoing inspection, zoom/pan, and opening notes. Settings → Graph persists bundling strength separately from note files, with 85% as the default.
 - A formatting toolbar toggles with a button.
 - The main title is the first Markdown heading. New filenames follow the title until manually renamed. Empty titles use unique Untitled filenames. Existing filenames are preserved on opening.
 - Autosave indicates saving, saved, or failed, and retains unsaved changes after failure.

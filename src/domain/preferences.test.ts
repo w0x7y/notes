@@ -5,6 +5,17 @@ import {
   preferencesSchema,
 } from "./preferences";
 import { settingsSchema } from "./contracts";
+it("defaults and bounds hierarchical graph bundling strength", () => {
+  expect(preferencesSchema.parse({}).graphBundling).toBe(0.85);
+  for (const value of [0, 0.4, 0.85, 1])
+    expect(
+      preferencesSchema.parse({ graphBundling: value }).graphBundling,
+    ).toBe(value);
+  for (const value of [-0.01, 1.01, Infinity, NaN])
+    expect(preferencesSchema.safeParse({ graphBundling: value }).success).toBe(
+      false,
+    );
+});
 it("supplies preferences for old settings and validates bounded values", () => {
   expect(
     settingsSchema.parse({

@@ -9,12 +9,16 @@ import { errorMessage } from "../domain/notes";
 import { Dialog } from "./Dialog";
 import { MenuButton } from "./PopupMenu";
 import "./settings.css";
+import { BundlingPreview } from "../knowledge/BundlingPreview";
+import "../knowledge/graph.css";
 
-type Section = "Editor" | "Saving" | "Search" | "Workspace" | "Shortcuts";
+type Section =
+  "Editor" | "Saving" | "Search" | "Graph" | "Workspace" | "Shortcuts";
 const sections: Section[] = [
   "Editor",
   "Saving",
   "Search",
+  "Graph",
   "Workspace",
   "Shortcuts",
 ];
@@ -84,10 +88,16 @@ function Choice<T extends string | number>({
     </MenuButton>
   );
 }
-export function SettingsDialog({ onClose }: { onClose: () => void }) {
+export function SettingsDialog({
+  onClose,
+  initialSection = "Editor",
+}: {
+  onClose: () => void;
+  initialSection?: Section;
+}) {
   const saved = useApp((state) => state.preferences);
   const [draft, setDraft] = useState(saved);
-  const [section, setSection] = useState<Section>("Editor");
+  const [section, setSection] = useState<Section>(initialSection);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const update = <K extends keyof Preferences>(key: K, value: Preferences[K]) =>
@@ -145,7 +155,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
               <button
                 key={name}
                 type="button"
-                data-dialog-focus={name === "Editor" ? true : undefined}
+                data-dialog-focus={name === initialSection ? true : undefined}
                 aria-current={section === name ? "page" : undefined}
                 onClick={() => setSection(name)}
               >
@@ -387,6 +397,37 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                 <p className="settings-note">
                   Search matches note titles and #tags. Combine both in one
                   query.
+                </p>
+              </>
+            )}
+            {section === "Graph" && (
+              <>
+                <h3>Graph</h3>
+                <Row
+                  label="Bundling strength"
+                  hint="Gather note links along shared workspace and folder routes."
+                >
+                  <div className="setting-range">
+                    <input
+                      type="range"
+                      aria-label="Bundling strength"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={draft.graphBundling}
+                      aria-valuetext={`${Math.round(draft.graphBundling * 100)} percent`}
+                      onChange={(event) =>
+                        update("graphBundling", Number(event.target.value))
+                      }
+                    />
+                    <output>{Math.round(draft.graphBundling * 100)}%</output>
+                  </div>
+                </Row>
+                <BundlingPreview strength={draft.graphBundling} />
+                <p className="settings-note">
+                  0% draws straight links. 100% follows the hierarchy most
+                  closely. The default is 85%. Open Note graph from workspace
+                  tools or the command palette.
                 </p>
               </>
             )}

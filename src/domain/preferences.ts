@@ -26,6 +26,7 @@ export const preferencesSchema = z.object({
   restoreSession: z.boolean().default(true),
   refreshOnFocus: z.boolean().default(true),
   sortFilesBy: z.enum(["name", "modified"]).default("name"),
+  graphBundling: z.number().min(0).max(1).default(0.85),
 });
 export type Preferences = z.infer<typeof preferencesSchema>;
 export const defaultPreferences = preferencesSchema.parse({});

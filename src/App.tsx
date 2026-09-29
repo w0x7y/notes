@@ -45,6 +45,11 @@ const ProjectsDialog = lazy(() =>
     default: m.ProjectsDialog,
   })),
 );
+const GraphDialog = lazy(() =>
+  import("./knowledge/GraphDialog").then((module) => ({
+    default: module.GraphDialog,
+  })),
+);
 const SearchDialog = lazy(() =>
   import("./components/SearchDialog").then((module) => ({
     default: module.SearchDialog,
@@ -117,11 +122,12 @@ import { chooseWorkspaceFolder, files } from "./platform";
 type Modal =
   | { kind: "search"; query: string }
   | {
-      kind: "contents" | "commands" | "templates" | "tasks" | "projects";
+      kind:
+        "contents" | "commands" | "templates" | "tasks" | "projects" | "graph";
     }
   | { kind: "folder" }
   | { kind: "workspace" }
-  | { kind: "settings" }
+  | { kind: "settings"; section?: "Graph" }
   | { kind: "rename"; document: NoteDocument }
   | { kind: "rename-image"; id: string; path: string }
   | { kind: "rename-folder"; id: string; path: string }
@@ -376,6 +382,11 @@ export default function App() {
             id: "templates",
             label: "New note from template",
             run: () => setModal({ kind: "templates" }),
+          },
+          {
+            id: "graph",
+            label: "Open note graph · hierarchical edge bundling",
+            run: () => setModal({ kind: "graph" }),
           },
           {
             id: "tasks",
@@ -734,7 +745,17 @@ export default function App() {
         {modal?.kind === "projects" && workspace && (
           <ProjectsDialog workspaceId={workspace.id} onClose={closeModal} />
         )}
-        {modal?.kind === "settings" && <SettingsDialog onClose={closeModal} />}
+        {modal?.kind === "graph" && workspace && (
+          <GraphDialog
+            workspaceId={workspace.id}
+            initialPath={focusedPath}
+            onClose={closeModal}
+            onSettings={() => setModal({ kind: "settings", section: "Graph" })}
+          />
+        )}
+        {modal?.kind === "settings" && (
+          <SettingsDialog initialSection={modal.section} onClose={closeModal} />
+        )}
         {modal?.kind === "search" && (
           <SearchDialog onClose={closeModal} initial={modal.query} />
         )}
@@ -807,7 +828,9 @@ export default function App() {
             hint="Enter a new name or a path inside an existing folder."
             submitLabel="Rename folder"
             onClose={closeModal}
-            onSubmit={(destination) => moveFolder(modal.id, modal.path, destination)}
+            onSubmit={(destination) =>
+              moveFolder(modal.id, modal.path, destination)
+            }
           />
         )}
         {modal?.kind === "delete" && (
