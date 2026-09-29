@@ -9,7 +9,7 @@ use model::{
     Appearance, DeleteResult, NoteFile, Preferences, RenameImageResult, SaveResult, Session,
     Settings, Snapshot, Workspace,
 };
-use service::{ImageData, Service};
+use service::{ImageData, MoveFolderResult, Service};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::Manager;
@@ -192,6 +192,18 @@ async fn create_folder(
     .await
 }
 #[tauri::command]
+async fn move_folder(
+    service: tauri::State<'_, Arc<Service>>,
+    workspace_id: String,
+    path: String,
+    destination: String,
+) -> Result<MoveFolderResult, String> {
+    work(service, move |s| {
+        s.move_folder(&workspace_id, &path, &destination)
+    })
+    .await
+}
+#[tauri::command]
 async fn read_image(
     service: tauri::State<'_, Arc<Service>>,
     workspace_id: String,
@@ -230,6 +242,7 @@ pub fn run() {
             rename_image,
             delete_file,
             create_folder,
+            move_folder,
             read_image
         ])
         .run(tauri::generate_context!())

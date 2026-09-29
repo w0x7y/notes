@@ -9,6 +9,34 @@ fn service() -> (tempfile::TempDir, Service) {
 }
 
 #[test]
+fn moving_folder_remaps_nested_files_metadata_and_links() {
+    let (_config, service) = service();
+    let root = tempdir().unwrap();
+    fs::create_dir_all(root.path().join("Old/Nested")).unwrap();
+    fs::create_dir(root.path().join("Target")).unwrap();
+    fs::write(root.path().join("Old/Nested/Topic.md"), "# Topic\n").unwrap();
+    fs::write(root.path().join("Index.md"), "[[Old/Nested/Topic]]\n").unwrap();
+    let id = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    let result = service.move_folder(&id, "Old", "Target/Renamed").unwrap();
+    assert_eq!(result.path, "Target/Renamed");
+    assert!(root.path().join("Target/Renamed/Nested/Topic.md").exists());
+    assert!(!root.path().join("Old").exists());
+    assert!(fs::read_to_string(root.path().join("Index.md"))
+        .unwrap()
+        .contains("Target/Renamed/Nested/Topic"));
+    assert!(service
+        .move_folder(&id, "Target", "Target/Renamed/Inside")
+        .is_err());
+    assert!(service
+        .move_folder(&id, "Target/Renamed", "Target")
+        .is_err());
+}
+
+#[test]
 fn drawing_svg_exports_are_immutable_bounded_and_path_safe() {
     let (_config, service) = service();
     let root = tempdir().unwrap();

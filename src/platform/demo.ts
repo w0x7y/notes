@@ -310,6 +310,52 @@ export function createDemoFiles(): FileService {
         throw new Error("Enter a folder name.");
       folders.get(id)?.add((parent ? parent + "/" : "") + name);
     },
+    moveFolder: async (id, path, destination) => {
+      const current = folders.get(id);
+      const parent = parentFolder(destination);
+      if (!current?.has(path)) throw new Error("Folder not found.");
+      if (
+        destination !== path &&
+        (destination.startsWith(path + "/") || (!current.has(parent) && parent))
+      )
+        throw new Error("Choose an existing folder outside this folder.");
+      if (
+        destination !== path &&
+        (current.has(destination) ||
+          files.has(`${id}:${destination}`) ||
+          images.has(`${id}:${destination}`))
+      )
+        throw new Error("An entry already exists at that path.");
+      const map = (value: string) =>
+        value === path || value.startsWith(path + "/")
+          ? destination + value.slice(path.length)
+          : value;
+      for (const folder of [...current])
+        if (map(folder) !== folder) {
+          current.delete(folder);
+          current.add(map(folder));
+        }
+      for (const [key, note] of [...files])
+        if (key.startsWith(id + ":") && map(note.path) !== note.path) {
+          files.delete(key);
+          const moved = { ...note, path: map(note.path) };
+          files.set(`${id}:${moved.path}`, moved);
+        }
+      for (const [key, image] of [...images])
+        if (key.startsWith(id + ":") && map(image.path) !== image.path) {
+          images.delete(key);
+          const moved = { ...image, path: map(image.path) };
+          images.set(`${id}:${moved.path}`, moved);
+        }
+      const styles = settings.appearances[id];
+      if (styles)
+        for (const [key, value] of Object.entries(styles))
+          if (map(key) !== key) {
+            delete styles[key];
+            styles[map(key)] = value;
+          }
+      return { path: destination, rewritten: [], warnings: [] };
+    },
     readImage: async (id, path) => {
       const image = images.get(`${id}:${path}`);
       if (!image) throw new Error("Image not found.");

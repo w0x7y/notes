@@ -191,6 +191,11 @@ button[aria-pressed="true"] {
 .folder-selected {
   color: var(--bright);
 }
+.tree-row.drop-target,
+.section-name.drop-target {
+  background: var(--selection);
+  color: var(--bright);
+}
 .chevron {
   display: flex;
   width: 10px;

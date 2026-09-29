@@ -424,6 +424,87 @@ export async function renameNote(
   );
 }
 
+export async function moveEntry(
+  id: string,
+  path: string,
+  kind: Entry["kind"],
+  folder: string,
+): Promise<void> {
+  const destination = [folder, path.split("/").at(-1)]
+    .filter(Boolean)
+    .join("/");
+  if (destination === path) return;
+  if (kind === "folder" && (folder === path || folder.startsWith(path + "/")))
+    throw new Error("Cannot move a folder into itself.");
+  if (kind === "note") {
+    await flushAll();
+    const document = await loadDocument(id, path);
+    await renameNote(document, destination);
+  } else if (kind === "image") {
+    await renameImage(id, path, destination);
+  } else {
+    await moveFolder(id, path, destination);
+  }
+}
+
+export async function moveFolder(
+  id: string,
+  path: string,
+  destination: string,
+): Promise<void> {
+  await flushAll();
+  const result = await files.moveFolder(id, path, destination);
+  if (result.path === path) return;
+  const map = (value: string) =>
+    value === path || value.startsWith(path + "/")
+      ? result.path + value.slice(path.length)
+      : value;
+  for (const entry of useApp.getState().entries[id] ?? []) {
+    const updated = map(entry.path);
+    if (updated !== entry.path) remapFavorite(id, entry.path, updated);
+  }
+  for (const [oldKey, document] of [...documents]) {
+    if (document.workspaceId !== id) continue;
+    const oldPath = document.getSnapshot().path;
+    const newPath = map(oldPath);
+    if (newPath === oldPath) continue;
+    const note = await files.readNote(id, newPath);
+    documents.delete(oldKey);
+    document.relocate(note);
+    documents.set(key(id, newPath), document);
+  }
+  useApp.setState((state) => {
+    const appearances: (typeof state.appearances)[string] = {};
+    for (const [oldPath, value] of Object.entries(state.appearances[id] ?? {}))
+      appearances[map(oldPath)] = value;
+    return {
+      entries: {
+        ...state.entries,
+        [id]: (state.entries[id] ?? []).map((entry) => ({
+          ...entry,
+          path: map(entry.path),
+        })),
+      },
+      appearances: { ...state.appearances, [id]: appearances },
+    };
+  });
+  changeSession(id, (session) => ({
+    ...session,
+    tabs: session.tabs.map(map),
+    primary: session.primary ? map(session.primary) : null,
+    secondary: session.secondary ? map(session.secondary) : null,
+  }));
+  applyRewrites(
+    result.rewritten.filter(
+      (rewrite) =>
+        rewrite.workspaceId !== id ||
+        !rewrite.path.startsWith(result.path + "/"),
+    ),
+  );
+  await refreshWorkspace(id);
+  if (result.warnings.length) showError(result.warnings.join("\n"));
+}
+
 export async function saveCopy(document: NoteDocument): Promise<void> {
   const content = document.content;
   const note = await files.createNote(document.workspaceId, "");

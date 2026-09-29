@@ -36,6 +36,14 @@ pub struct Service {
     trash: Arc<dyn Trash>,
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MoveFolderResult {
+    pub path: String,
+    pub rewritten: Vec<Rewrite>,
+    pub warnings: Vec<String>,
+}
+
 pub trait Trash: Send + Sync {
     fn delete(&self, path: &Path) -> Result<(), String>;
 }
@@ -85,6 +93,11 @@ fn move_session_path(settings: &mut Settings, id: &str, old: &str, new: &str) {
             session.secondary = Some(new.into());
         }
     }
+}
+
+fn remap_tree_path(path: &str, old: &str, new: &str) -> Option<String> {
+    (path == old || path.starts_with(&format!("{old}/")))
+        .then(|| format!("{new}{}", &path[old.len()..]))
 }
 
 fn remove_session_path(settings: &mut Settings, id: &str, path: &str) {
@@ -815,6 +828,123 @@ impl Service {
             return Err("Parent folder does not exist".into());
         }
         fs::create_dir(base.join(name)).map_err(|e| err("Cannot create folder", e))
+    }
+
+    pub fn move_folder(
+        &self,
+        id: &str,
+        path: &str,
+        destination: &str,
+    ) -> Result<MoveFolderResult, String> {
+        let mut state = self.state.lock().map_err(|_| "Settings lock failed")?;
+        let selected = workspace(&state.settings, id)?.clone();
+        let root = Path::new(&selected.path);
+        let source = resolve(root, path, false)?;
+        if !fs::symlink_metadata(&source)
+            .map_err(|e| err("Cannot inspect folder", e))?
+            .is_dir()
+        {
+            return Err("Only folders can be moved".into());
+        }
+        let requested = relative(destination, false)?;
+        let name = requested.file_name().ok_or("Invalid folder name")?;
+        if name.to_string_lossy().starts_with('.')
+            || name.to_string_lossy().contains('\\')
+            || name.to_string_lossy().chars().any(char::is_control)
+            || matches!(name.to_str(), Some("node_modules" | "__pycache__"))
+        {
+            return Err("Folder name is hidden or excluded from the workspace".into());
+        }
+        let parent = requested.parent().unwrap_or(Path::new(""));
+        let directory = resolve(root, parent.to_str().ok_or("Invalid destination")?, true)?;
+        if !directory.is_dir() {
+            return Err("Destination folder does not exist".into());
+        }
+        let target = directory.join(name);
+        if target == source {
+            return Ok(MoveFolderResult {
+                path: path.into(),
+                rewritten: Vec::new(),
+                warnings: Vec::new(),
+            });
+        }
+        if target.starts_with(&source) {
+            return Err("Cannot move a folder into itself".into());
+        }
+        if fs::symlink_metadata(&target).is_ok() {
+            return Err("An entry already exists at that path".into());
+        }
+        let descendants: Vec<PathBuf> = WalkDir::new(&source)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry.file_type().is_file() && (is_note(entry.path()) || is_image(entry.path()))
+            })
+            .map(|entry| entry.path().to_path_buf())
+            .collect();
+        fs::rename(&source, &target).map_err(|e| err("Cannot move folder", e))?;
+        self.scan_cache.remove_root(root);
+        let new_path = normalized_relative(root, &target)?;
+        if let Some(appearances) = state.settings.appearances.get_mut(id) {
+            let old = std::mem::take(appearances);
+            *appearances = old
+                .into_iter()
+                .map(|(key, value)| (remap_tree_path(&key, path, &new_path).unwrap_or(key), value))
+                .collect();
+        }
+        if let Some(session) = state.settings.sessions.get_mut(id) {
+            for tab in &mut session.tabs {
+                if let Some(mapped) = remap_tree_path(tab, path, &new_path) {
+                    *tab = mapped;
+                }
+            }
+            if let Some(value) = &mut session.primary {
+                if let Some(mapped) = remap_tree_path(value, path, &new_path) {
+                    *value = mapped;
+                }
+            }
+            if let Some(value) = &mut session.secondary {
+                if let Some(mapped) = remap_tree_path(value, path, &new_path) {
+                    *value = mapped;
+                }
+            }
+        }
+        let prefix = format!("{id}\0");
+        let names = std::mem::take(&mut state.auto_names);
+        state.auto_names = names
+            .into_iter()
+            .map(|(key, value)| {
+                let mapped = key
+                    .strip_prefix(&prefix)
+                    .and_then(|item| remap_tree_path(item, path, &new_path));
+                (
+                    mapped.map(|item| format!("{prefix}{item}")).unwrap_or(key),
+                    value,
+                )
+            })
+            .collect();
+        let mut rewritten = Vec::new();
+        let mut warnings = Vec::new();
+        for old in descendants {
+            let new = target.join(
+                old.strip_prefix(&source)
+                    .map_err(|e| err("Cannot map moved file", e))?,
+            );
+            let (links, issues) = self.rewrite_incoming(&state, &old, &new, id);
+            rewritten.extend(links);
+            warnings.extend(issues);
+        }
+        if let Err(error) = self.persist(&state) {
+            warnings.push(format!(
+                "Folder moved, but workspace settings were not saved: {error}"
+            ));
+        }
+        Ok(MoveFolderResult {
+            path: new_path,
+            rewritten,
+            warnings,
+        })
     }
     pub fn read_image(&self, id: &str, path: &str) -> Result<ImageData, String> {
         let state = self.state.lock().map_err(|_| "Settings lock failed")?;

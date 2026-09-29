@@ -6,6 +6,7 @@ import {
   deleteResultSchema,
   imageRenameSchema,
   imageSchema,
+  moveFolderSchema,
   noteSchema,
   saveResultSchema,
   settingsSchema,
@@ -81,6 +82,8 @@ export const nativeFiles: FileService = {
     ),
   createFolder: (workspaceId, parent, name) =>
     invoke("create_folder", { workspaceId, parent, name }),
+  moveFolder: (workspaceId, path, destination) =>
+    call("move_folder", { workspaceId, path, destination }, moveFolderSchema),
   readImage: (workspaceId, path) =>
     call("read_image", { workspaceId, path }, imageSchema),
 };

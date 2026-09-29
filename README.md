@@ -31,7 +31,7 @@ On NVIDIA/Wayland, startup applies `__NV_DISABLE_EXPLICIT_SYNC=1` unless explici
 - App settings open from the sidebar or Ctrl+comma. Adjust editor font/size/spacing, wrapping, line numbers, tab size, spellcheck, reading width, default preview, autosave delay, search scope/order/limit, session restoration, focus refresh, and file ordering. Settings persist outside your notes; Reset to defaults is available before saving.
 - Workspace and icon menus use the app theme. Dialogs focus their first field on opening; menus support arrow keys and Escape without focus outlines.
 - Right-click a note or image to open it, split it, rename/move it, customize its icon/color, copy its path, or move it to Trash.
-- Right-click folders to customize their icon and name color. All 2,118 names in the installed free Lucide catalog are searchable and bundled offline; no account is needed. Workspace settings use the same picker. Colors can use a palette or a custom hex value.
+- Right-click a folder to rename or move it, or customize its icon and name color. Drag notes, images, or folders onto a folder or the Files heading to move them within the workspace. Existing destinations and moves into a folder itself are rejected. All 2,118 names in the installed free Lucide catalog are searchable and bundled offline; no account is needed. Workspace settings use the same picker. Colors can use a palette or a custom hex value.
 - Remove a workspace through its settings without deleting its directory. Pending notes save first; failures keep the workspace open.
 - Ordinary `.md` files, optional folders, inline English/Hebrew tags.
 - Global fuzzy title/tag search, with the current workspace first. Combine terms, such as `vector #exam`.

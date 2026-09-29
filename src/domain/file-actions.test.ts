@@ -129,6 +129,26 @@ it("flushes pending note edits before renaming an image and applying rewritten l
   expect(doc.dirty).toBe(false);
 });
 
+it("moves a folder with its open note, tab, and appearance", async () => {
+  const app = await import("./app-store");
+  const { files } = await import("../platform");
+  await app.initialize();
+  const document = await app.loadDocument("algebra", "Lectures/Eigenvalues.md");
+  await app.setEntryAppearance("algebra", "Lectures/Eigenvalues.md", {
+    icon: "star",
+    color: null,
+  });
+  document.edit("# Edited before moving\n");
+  await app.moveFolder("algebra", "Lectures", "Assignments/Lectures");
+  const moved = "Assignments/Lectures/Eigenvalues.md";
+  expect(document.getSnapshot().path).toBe(moved);
+  expect(document.content).toBe("# Edited before moving\n");
+  expect(app.useApp.getState().sessions.algebra?.primary).toBe(moved);
+  expect(app.useApp.getState().appearances.algebra?.[moved]?.icon).toBe("star");
+  expect((await files.readNote("algebra", moved)).content).toBe(document.content);
+  await expect(files.readNote("algebra", "Lectures/Eigenvalues.md")).rejects.toThrow();
+});
+
 it("releases a closed saved document and reloads its current disk contents on reopening", async () => {
   const app = await import("./app-store");
   const { files } = await import("../platform");

@@ -91,6 +91,8 @@ import {
   closeFile,
   deleteEntry,
   renameImage,
+  moveEntry,
+  moveFolder,
   removeWorkspace,
   setEntryAppearance,
   currentSession,
@@ -122,6 +124,7 @@ type Modal =
   | { kind: "settings" }
   | { kind: "rename"; document: NoteDocument }
   | { kind: "rename-image"; id: string; path: string }
+  | { kind: "rename-folder"; id: string; path: string }
   | { kind: "appearance"; id: string; path: string; document?: NoteDocument }
   | {
       kind: "delete";
@@ -491,6 +494,13 @@ export default function App() {
           onRename={(path) => {
             if (
               workspace &&
+              entries.find((entry) => entry.path === path)?.kind === "folder"
+            ) {
+              setModal({ kind: "rename-folder", id: workspace.id, path });
+              return;
+            }
+            if (
+              workspace &&
               entries.find((entry) => entry.path === path)?.kind === "image"
             ) {
               setModal({ kind: "rename-image", id: workspace.id, path });
@@ -502,6 +512,22 @@ export default function App() {
                   setModal({ kind: "rename", document }),
                 ),
               );
+          }}
+          onMove={(path, folder) => {
+            if (!workspace) return;
+            const entry = entries.find((item) => item.path === path);
+            if (!entry) return;
+            run(
+              moveEntry(workspace.id, path, entry.kind, folder).then(() => {
+                if (entry.kind === "folder")
+                  setSelectedFolder((current) =>
+                    current === path || current.startsWith(path + "/")
+                      ? [folder, basename(path)].filter(Boolean).join("/") +
+                        current.slice(path.length)
+                      : current,
+                  );
+              }),
+            );
           }}
           onAppearance={(path) => {
             if (!workspace) return;
@@ -779,6 +805,25 @@ export default function App() {
             submitLabel="Rename image"
             onClose={closeModal}
             onSubmit={(name) => renameImage(modal.id, modal.path, name)}
+          />
+        )}
+        {modal?.kind === "rename-folder" && (
+          <TextDialog
+            title="Rename or move folder"
+            label="Path inside this workspace"
+            initial={modal.path}
+            hint="Enter a new name or a path inside an existing folder."
+            submitLabel="Rename folder"
+            onClose={closeModal}
+            onSubmit={async (destination) => {
+              const oldPath = modal.path;
+              await moveFolder(modal.id, oldPath, destination);
+              setSelectedFolder((current) =>
+                current === oldPath || current.startsWith(oldPath + "/")
+                  ? destination + current.slice(oldPath.length)
+                  : current,
+              );
+            }}
           />
         )}
         {modal?.kind === "delete" && (

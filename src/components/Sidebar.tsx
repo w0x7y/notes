@@ -3,7 +3,7 @@ import {
   PinnedNotes,
   type WorkspaceTool,
 } from "../knowledge/WorkspaceTools";
-import { useMemo, useState, type MouseEvent } from "react";
+import { useMemo, useState, type DragEvent, type MouseEvent } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -50,6 +50,7 @@ type Props = {
   onOpen: (path: string) => void;
   onOpenSplit: (path: string) => void;
   onRename: (path: string) => void;
+  onMove: (path: string, folder: string) => void;
   onAppearance: (path: string) => void;
   onDelete: (path: string) => void;
   onWorkspace: (id: string) => void;
@@ -62,6 +63,57 @@ type Props = {
   onNewFolder: () => void;
 };
 
+const dragType = "application/x-notes-entry";
+type DragProps = {
+  workspaceId?: string;
+  dropTarget: string | null;
+  setDropTarget: (path: string | null) => void;
+  onMove: Props["onMove"];
+};
+function startDrag(
+  event: DragEvent<HTMLButtonElement>,
+  path: string,
+  workspaceId?: string,
+) {
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData(dragType, JSON.stringify({ path, workspaceId }));
+  event.dataTransfer.setData("text/plain", path);
+}
+function canDrop(event: DragEvent, folder: string, workspaceId?: string) {
+  if (!workspaceId || !event.dataTransfer.types.includes(dragType))
+    return false;
+  const source = event.dataTransfer.getData(dragType);
+  if (!source) return true;
+  try {
+    const item = JSON.parse(source) as { path: string; workspaceId: string };
+    return (
+      item.workspaceId === workspaceId &&
+      item.path !== folder &&
+      !folder.startsWith(item.path + "/")
+    );
+  } catch {
+    return false;
+  }
+}
+function drop(event: DragEvent, folder: string, props: DragProps) {
+  event.preventDefault();
+  props.setDropTarget(null);
+  try {
+    const item = JSON.parse(event.dataTransfer.getData(dragType)) as {
+      path: string;
+      workspaceId: string;
+    };
+    if (
+      item.workspaceId === props.workspaceId &&
+      item.path !== folder &&
+      !folder.startsWith(item.path + "/")
+    )
+      props.onMove(item.path, folder);
+  } catch {
+    /* Ignore other drag sources. */
+  }
+}
+
 function FolderNode({
   path,
   tree,
@@ -69,7 +121,8 @@ function FolderNode({
 }: { path: string; tree: ReadonlyMap<string, Entry[]> } & Pick<
   Props,
   "active" | "selectedFolder" | "onFolder" | "onOpen" | "appearances"
-> & {
+> &
+  DragProps & {
     onContextMenu: (event: MouseEvent<HTMLButtonElement>, entry: Entry) => void;
   }) {
   const children = tree.get(path) ?? [];
@@ -87,6 +140,10 @@ function FolderNode({
         ) : (
           <button
             key={entry.path}
+            draggable
+            onDragStart={(event) =>
+              startDrag(event, entry.path, props.workspaceId)
+            }
             className={`tree-row ${props.active === entry.path ? "active" : ""}`}
             onClick={() => props.onOpen(entry.path)}
             onContextMenu={(event) => props.onContextMenu(event, entry)}
@@ -115,7 +172,8 @@ function FolderBranch(
   } & Pick<
     Props,
     "active" | "selectedFolder" | "onFolder" | "onOpen" | "appearances"
-  > & {
+  > &
+    DragProps & {
       onContextMenu: (
         event: MouseEvent<HTMLButtonElement>,
         entry: Entry,
@@ -126,7 +184,25 @@ function FolderBranch(
   return (
     <div>
       <button
-        className={`tree-row folder-row ${props.selectedFolder === props.path ? "folder-selected" : ""}`}
+        className={`tree-row folder-row ${props.selectedFolder === props.path ? "folder-selected" : ""} ${props.dropTarget === props.path ? "drop-target" : ""}`}
+        draggable
+        onDragStart={(event) => {
+          event.stopPropagation();
+          startDrag(event, props.path, props.workspaceId);
+        }}
+        onDragOver={(event) => {
+          if (canDrop(event, props.path, props.workspaceId)) {
+            event.preventDefault();
+            event.stopPropagation();
+            event.dataTransfer.dropEffect = "move";
+            props.setDropTarget(props.path);
+          }
+        }}
+        onDragLeave={() => props.setDropTarget(null)}
+        onDrop={(event) => {
+          event.stopPropagation();
+          drop(event, props.path, props);
+        }}
         onClick={() => {
           setOpen(!open);
           props.onFolder(props.path);
@@ -151,6 +227,7 @@ function FolderBranch(
 }
 
 export function Sidebar(props: Props) {
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [context, setContext] = useState<{
     entry: Entry;
     anchor: MenuAnchor;
@@ -219,7 +296,23 @@ export function Sidebar(props: Props) {
       <PinnedNotes />
       <div className="sidebar-section">
         <button
-          className={`section-name ${!props.selectedFolder ? "selected-root" : ""}`}
+          className={`section-name ${!props.selectedFolder ? "selected-root" : ""} ${dropTarget === "" ? "drop-target" : ""}`}
+          onDragOver={(event) => {
+            if (canDrop(event, "", props.workspace?.id)) {
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "move";
+              setDropTarget("");
+            }
+          }}
+          onDragLeave={() => setDropTarget(null)}
+          onDrop={(event) =>
+            drop(event, "", {
+              workspaceId: props.workspace?.id,
+              dropTarget,
+              setDropTarget,
+              onMove: props.onMove,
+            })
+          }
           onClick={() => props.onFolder("")}
         >
           Files
@@ -257,6 +350,10 @@ export function Sidebar(props: Props) {
             selectedFolder={props.selectedFolder}
             onFolder={props.onFolder}
             onOpen={props.onOpen}
+            workspaceId={props.workspace?.id}
+            dropTarget={dropTarget}
+            setDropTarget={setDropTarget}
+            onMove={props.onMove}
             onContextMenu={(event, entry) => {
               event.preventDefault();
               const trigger = event.currentTarget;
@@ -322,7 +419,14 @@ export function Sidebar(props: Props) {
                     onSelect: () => props.onRename(context.entry.path),
                   },
                 ]
-              : []),
+              : [
+                  {
+                    id: "rename",
+                    label: "Rename or move…",
+                    icon: <PencilLine size={15} />,
+                    onSelect: () => props.onRename(context.entry.path),
+                  },
+                ]),
             {
               id: "appearance",
               label: "Icon and color…",

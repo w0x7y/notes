@@ -85,6 +85,19 @@ export type SearchEntry = Entry & {
   color: string;
 };
 
+export const moveFolderSchema = z.object({
+  path: z.string(),
+  rewritten: z.array(
+    z.object({
+      workspaceId: z.string(),
+      path: z.string(),
+      content: z.string(),
+      revision: z.string(),
+    }),
+  ),
+  warnings: z.array(z.string()),
+});
+
 export interface FileService {
   readonly kind: "native" | "demo";
   loadSettings(): Promise<Settings>;
@@ -129,5 +142,10 @@ export interface FileService {
     parent: string,
     name: string,
   ): Promise<void>;
+  moveFolder(
+    workspaceId: string,
+    path: string,
+    destination: string,
+  ): Promise<z.infer<typeof moveFolderSchema>>;
   readImage(workspaceId: string, path: string): Promise<ImageFile>;
 }

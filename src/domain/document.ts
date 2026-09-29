@@ -186,6 +186,20 @@ export class NoteDocument {
     });
   }
 
+  relocate(note: NoteFile): void {
+    if (this.dirty || this.pending)
+      throw new Error("Save the note before moving its folder.");
+    this.content = this.savedContent = note.content;
+    this.revision = note.revision;
+    this.publish({
+      path: note.path,
+      title: splitNote(note.content).title,
+      autoRename: note.autoRename,
+      status: { kind: "saved" },
+      externalVersion: this.snapshot.externalVersion + 1,
+    });
+  }
+
   dispose(): void {
     clearTimeout(this.timer);
     this.listeners.clear();

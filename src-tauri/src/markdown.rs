@@ -158,6 +158,11 @@ pub fn first_h1(content: &str) -> Option<String> {
 }
 
 fn path_eq(candidate: &Path, target: &Path) -> bool {
+    // After a folder move the old parent no longer exists. Qualified paths
+    // still identify the old file by its exact workspace-relative spelling.
+    if candidate == target {
+        return true;
+    }
     let Some(parent) = candidate.parent() else {
         return false;
     };

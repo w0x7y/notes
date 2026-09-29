@@ -25,6 +25,7 @@ Commands (argument names are the exact frontend invoke object keys):
 - `save_note({workspaceId,path,content,revision}) -> SaveResult` (optimistic conflict detection, atomic write; title-driven filenames only for app-created notes until manual rename)
 - `rename_note({workspaceId,path,name,revision}) -> SaveResult` (explicit filename, autoRename false; name may be a workspace-relative destination path; never overwrite another file)
 - `create_folder({workspaceId,parent,name}) -> void`
+- `move_folder({workspaceId,path,destination}) -> {path:string,rewritten:Rewrite[],warnings:string[]}` (rename or move an existing folder inside its workspace; reject collisions and descendants)
 - `read_image({workspaceId,path}) -> {data:string,mime:string}` (base64 data, allowlist extensions, reasonable size bound)
 
 Automatic title is the first H1 Markdown heading; preserve source formatting. Empty title maps to Untitled. Sanitize path separators/control characters and choose a unique destination, with existing source exempt from collision checks. Store auto-naming state outside workspaces and preserve existing filenames.
