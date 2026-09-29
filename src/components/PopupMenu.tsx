@@ -4,6 +4,7 @@ import { Check, ChevronDown } from "lucide-react";
 export type MenuAction = {
   id: string;
   label: string;
+  color?: string;
   icon?: ReactNode;
   selected?: boolean;
   danger?: boolean;
@@ -115,7 +116,7 @@ export function PopupMenu({
           }}
         >
           {action.icon}
-          <span>{action.label}</span>
+          <span style={{ color: action.color }}>{action.label}</span>
           {action.selected && <Check size={13} className="menu-check" />}
         </button>
       ))}

@@ -183,9 +183,6 @@ button[aria-pressed="true"] {
   background: var(--selection);
   color: var(--bright);
 }
-.tree-row.active > svg {
-  color: var(--blue);
-}
 .folder-row {
   gap: 6px;
 }
@@ -223,6 +220,7 @@ button[aria-pressed="true"] {
 }
 .workspace-path {
   padding: 13px 16px;
+  border-bottom: 1px solid var(--border);
   color: var(--muted);
   font-size: 10px;
   overflow: hidden;
@@ -280,9 +278,6 @@ button[aria-pressed="true"] {
   height: 1px;
   background: var(--blue);
   pointer-events: none;
-}
-.tab.active .tab-label > svg {
-  color: var(--blue);
 }
 .tab-label {
   display: flex;

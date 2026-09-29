@@ -85,6 +85,7 @@ function FolderNode({
             onClick={() => props.onOpen(entry.path)}
             onContextMenu={(event) => props.onContextMenu(event, entry)}
             title={entry.path}
+            style={{ color: props.appearances[entry.path]?.color ?? undefined }}
             aria-current={props.active === entry.path ? "page" : undefined}
           >
             <ItemIcon
@@ -92,14 +93,7 @@ function FolderNode({
               fallback={entry.kind === "image" ? "image" : "file"}
               size={16}
             />
-            <span
-              dir="auto"
-              style={{
-                color: props.appearances[entry.path]?.color ?? undefined,
-              }}
-            >
-              {basename(entry.path)}
-            </span>
+            <span dir="auto">{basename(entry.path)}</span>
           </button>
         ),
       )}
@@ -132,6 +126,7 @@ function FolderBranch(
           props.onFolder(props.path);
         }}
         aria-expanded={open}
+        style={{ color: props.appearances[props.path]?.color ?? undefined }}
         onContextMenu={(event) => props.onContextMenu(event, props.entry)}
       >
         <span className="chevron">
@@ -142,12 +137,7 @@ function FolderBranch(
           fallback={open ? "folder-open" : "folder"}
           size={16}
         />
-        <span
-          dir="auto"
-          style={{ color: props.appearances[props.path]?.color ?? undefined }}
-        >
-          {basename(props.path)}
-        </span>
+        <span dir="auto">{basename(props.path)}</span>
       </button>
       {open && <FolderNode {...props} />}
     </div>
@@ -185,6 +175,7 @@ export function Sidebar(props: Props) {
             ...props.workspaces.map((workspace) => ({
               id: workspace.id,
               label: workspace.name,
+              color: workspace.color,
               selected: workspace.id === props.workspace?.id,
               icon: (
                 <span style={{ color: workspace.color }}>
@@ -201,7 +192,9 @@ export function Sidebar(props: Props) {
             },
           ]}
         >
-          {props.workspace?.name ?? "Choose a workspace"}
+          <span style={{ color: props.workspace?.color ?? undefined }}>
+            {props.workspace?.name ?? "Choose a workspace"}
+          </span>
         </MenuButton>
         {props.workspace && (
           <button
@@ -361,6 +354,9 @@ export function Sidebar(props: Props) {
           ]}
         />
       )}
+      <div className="workspace-path" title={props.workspace?.path}>
+        {props.workspace?.path ?? "Local Markdown notes"}
+      </div>
       <button
         className="app-settings-button"
         onClick={props.onAppSettings}
@@ -371,9 +367,6 @@ export function Sidebar(props: Props) {
         <span>Settings</span>
         <kbd>Ctrl ,</kbd>
       </button>
-      <div className="workspace-path" title={props.workspace?.path}>
-        {props.workspace?.path ?? "Local Markdown notes"}
-      </div>
     </aside>
   );
 }

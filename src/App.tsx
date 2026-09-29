@@ -429,6 +429,7 @@ export default function App() {
               >
                 <button
                   className="tab-label"
+                  style={{ color: appearances[path]?.color ?? undefined }}
                   role="tab"
                   aria-selected={focusedPath === path}
                   onClick={() => {
@@ -445,12 +446,7 @@ export default function App() {
                         : "file"
                     }
                   />
-                  <span
-                    dir="auto"
-                    style={{ color: appearances[path]?.color ?? undefined }}
-                  >
-                    {basename(path)}
-                  </span>
+                  <span dir="auto">{basename(path)}</span>
                 </button>
                 <button
                   className="close-tab"
