@@ -1,3 +1,4 @@
+mod drawing;
 pub mod markdown;
 pub mod model;
 pub mod pathing;
@@ -26,6 +27,26 @@ async fn work<T: Send + 'static>(
 #[tauri::command]
 async fn load_settings(service: tauri::State<'_, Arc<Service>>) -> Result<Settings, String> {
     work(service, |s| s.load_settings()).await
+}
+#[tauri::command]
+async fn ensure_capture_workspace(
+    app: tauri::AppHandle,
+    service: tauri::State<'_, Arc<Service>>,
+) -> Result<Snapshot, String> {
+    let documents = app
+        .path()
+        .document_dir()
+        .or_else(|_| app.path().home_dir().map(|home| home.join("Documents")))
+        .map_err(|e| e.to_string())?;
+    work(service, move |s| s.ensure_capture_workspace(&documents)).await
+}
+#[tauri::command]
+async fn write_drawing_svg(
+    service: tauri::State<'_, Arc<Service>>,
+    workspace_id: String,
+    svg: String,
+) -> Result<String, String> {
+    work(service, move |s| s.write_drawing_svg(&workspace_id, &svg)).await
 }
 #[tauri::command]
 async fn save_preferences(
@@ -193,6 +214,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             load_settings,
+            ensure_capture_workspace,
+            write_drawing_svg,
             save_preferences,
             save_sessions,
             add_workspace,

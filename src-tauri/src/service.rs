@@ -321,6 +321,60 @@ impl Service {
         drop(state);
         self.scan(&selected)
     }
+    pub fn ensure_capture_workspace(&self, documents: &Path) -> Result<Snapshot, String> {
+        fs::create_dir_all(documents).map_err(|e| err("Cannot create Documents directory", e))?;
+        let documents = documents
+            .canonicalize()
+            .map_err(|e| err("Cannot resolve Documents directory", e))?;
+        let root = resolve(&documents, "Quick Notes", false)?;
+        fs::create_dir_all(&root).map_err(|e| err("Cannot create Quick Notes workspace", e))?;
+        for name in ["Inbox", "Daily"] {
+            let folder = resolve(&root, name, false)?;
+            fs::create_dir_all(folder).map_err(|e| err("Cannot create capture folder", e))?;
+        }
+        self.add_workspace(root.to_str().ok_or("Workspace path is not valid UTF-8")?)
+    }
+    pub fn write_drawing_svg(&self, id: &str, svg: &str) -> Result<String, String> {
+        crate::drawing::validate_svg(svg)?;
+        let state = self.state.lock().map_err(|_| "Settings lock failed")?;
+        let selected = workspace(&state.settings, id)?;
+        let root = Path::new(&selected.path);
+        for folder in ["assets", "assets/drawings"] {
+            let target = resolve(root, folder, false)?;
+            fs::create_dir_all(target)
+                .map_err(|e| err("Cannot create drawing assets folder", e))?;
+        }
+        let relative = format!("assets/drawings/{}.svg", revision(svg));
+        let target = resolve(root, &relative, false)?;
+        if target.exists() {
+            if fs::metadata(&target)
+                .map_err(|e| err("Cannot inspect drawing preview", e))?
+                .len()
+                != svg.len() as u64
+                || fs::read(&target).map_err(|e| err("Cannot read drawing preview", e))?
+                    != svg.as_bytes()
+            {
+                return Err(
+                    "Existing drawing preview has changed; refusing to overwrite it".into(),
+                );
+            }
+        } else {
+            let parent = target.parent().ok_or("Invalid drawing preview path")?;
+            let mut temp = NamedTempFile::new_in(parent)
+                .map_err(|e| err("Cannot create drawing preview", e))?;
+            temp.write_all(svg.as_bytes())
+                .map_err(|e| err("Cannot write drawing preview", e))?;
+            temp.as_file()
+                .sync_all()
+                .map_err(|e| err("Cannot sync drawing preview", e))?;
+            temp.persist_noclobber(&target)
+                .map_err(|e| err("Cannot publish drawing preview", e.error))?;
+            fs::File::open(parent)
+                .and_then(|file| file.sync_all())
+                .map_err(|e| err("Cannot sync drawing folder", e))?;
+        }
+        Ok(relative)
+    }
     pub fn update_workspace(
         &self,
         id: &str,

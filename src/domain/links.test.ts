@@ -38,3 +38,20 @@ it("uses relative paths and decodes Markdown destinations", () => {
     resolveNoteLink("Other%20note.md", "project", "Source.md", entries),
   ).toEqual({ kind: "found", workspaceId: "project", path: "Other note.md" });
 });
+it("resolves heading-only links to the current file", () => {
+  expect(
+    resolveNoteLink("#מבוא", "school", "Lectures/Source.md", entries),
+  ).toEqual({
+    kind: "found",
+    workspaceId: "school",
+    path: "Lectures/Source.md",
+  });
+  expect(
+    resolveNoteLink(
+      "project:/Other%20note.md#Overview",
+      "school",
+      "Source.md",
+      entries,
+    ),
+  ).toEqual({ kind: "found", workspaceId: "project", path: "Other note.md" });
+});

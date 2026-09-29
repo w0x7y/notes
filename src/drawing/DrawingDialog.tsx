@@ -23,12 +23,13 @@ import {
 } from "lucide-react";
 import type { NoteDocument } from "../domain/document";
 import { Dialog } from "../components/Dialog";
-import { copyText } from "../platform";
+import { copyText, files } from "../platform";
 import { errorMessage } from "../domain/notes";
 import { DrawingBinding } from "./storage";
 import { sceneSchema, type Shape, type Tool } from "./model";
 import { DrawingController } from "./controller";
 import { exportSvg } from "./render";
+import { drawingPreviewLink } from "./preview-link";
 import "./drawing.css";
 
 const tools = [
@@ -102,6 +103,8 @@ function DrawingEditor({
   const [, redraw] = useReducer((n: number) => n + 1, 0);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
+  const [exporting, setExporting] = useState(false);
+  const savingPreview = useRef(false);
   const [editingText, setEditingText] = useState<Extract<
     Shape,
     { kind: "text" }
@@ -156,10 +159,39 @@ function DrawingEditor({
     );
     setEditingText(null);
   }
-  function close() {
+  async function savePreview(closeAfter: boolean) {
+    if (savingPreview.current || !controller.current) return;
     finishText();
-    void document.flush().catch(() => {});
-    onClose();
+    savingPreview.current = true;
+    setExporting(true);
+    try {
+      const shapes = controller.current.history.shapes;
+      const path = await files.writeDrawingSvg(
+        document.workspaceId,
+        exportSvg(shapes),
+      );
+      document.edit(
+        binding.update(
+          document.content,
+          shapes,
+          drawingPreviewLink(document.file.path, path),
+        ),
+      );
+      await document.flush();
+      setError(null);
+      setNotice("SVG preview saved");
+      if (closeAfter) onClose();
+    } catch (e) {
+      setError(
+        `Could not save the portable drawing preview: ${errorMessage(e)} Your drawing remains in the note.`,
+      );
+    } finally {
+      savingPreview.current = false;
+      setExporting(false);
+    }
+  }
+  function close() {
+    void savePreview(true);
   }
   async function copySvg() {
     if (!controller.current) return;
@@ -174,6 +206,7 @@ function DrawingEditor({
     <Dialog title="Drawing" className="drawing-dialog" onClose={close}>
       <div
         className="drawing-shell"
+        inert={exporting}
         onKeyDown={(event) => {
           event.stopPropagation();
           if (
@@ -189,8 +222,7 @@ function DrawingEditor({
             event.key.toLowerCase() === "s"
           ) {
             event.preventDefault();
-            finishText();
-            void document.flush().catch((e) => setError(errorMessage(e)));
+            void savePreview(false);
           }
         }}
       >
@@ -354,6 +386,9 @@ function DrawingEditor({
         {error && (
           <p className="drawing-error" role="alert">
             {error}
+            <button className="button" onClick={onClose}>
+              Back to note
+            </button>
           </p>
         )}
         <div className="drawing-footer">

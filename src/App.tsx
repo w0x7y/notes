@@ -1,3 +1,6 @@
+import { newLecture, openDaily, quickCapture } from "./knowledge/templates";
+import type { AppCommand } from "./knowledge/CommandDialog";
+import type { WorkspaceTool } from "./knowledge/WorkspaceTools";
 import {
   lazy,
   Suspense,
@@ -19,6 +22,29 @@ import {
   X,
 } from "lucide-react";
 import { Sidebar } from "./components/Sidebar";
+const ContentSearchDialog = lazy(() =>
+  import("./knowledge/ContentSearchDialog").then((m) => ({
+    default: m.ContentSearchDialog,
+  })),
+);
+const CommandDialog = lazy(() =>
+  import("./knowledge/CommandDialog").then((m) => ({
+    default: m.CommandDialog,
+  })),
+);
+const TemplateDialog = lazy(() =>
+  import("./knowledge/TemplateDialog").then((m) => ({
+    default: m.TemplateDialog,
+  })),
+);
+const TasksDialog = lazy(() =>
+  import("./knowledge/TasksDialog").then((m) => ({ default: m.TasksDialog })),
+);
+const ProjectsDialog = lazy(() =>
+  import("./knowledge/ProjectsDialog").then((m) => ({
+    default: m.ProjectsDialog,
+  })),
+);
 const SearchDialog = lazy(() =>
   import("./components/SearchDialog").then((module) => ({
     default: module.SearchDialog,
@@ -88,6 +114,7 @@ import { chooseWorkspaceFolder, files } from "./platform";
 
 type Modal =
   | { kind: "search"; query: string }
+  | { kind: "contents" | "commands" | "templates" | "tasks" | "projects" }
   | { kind: "folder" }
   | { kind: "workspace" }
   | { kind: "settings" }
@@ -183,7 +210,22 @@ export default function App() {
       }
       if (key === "p") {
         event.preventDefault();
-        setModal({ kind: "search", query: "" });
+        setModal(
+          event.shiftKey ? { kind: "contents" } : { kind: "search", query: "" },
+        );
+      }
+      if (key === "k") {
+        event.preventDefault();
+        setModal({ kind: "commands" });
+      }
+      if (key === "d" && event.shiftKey && !modal) {
+        event.preventDefault();
+        run(openDaily());
+      }
+      if (key === "n" && event.shiftKey && !modal) {
+        event.preventDefault();
+        run(quickCapture());
+        return;
       }
       if (key === "s") {
         event.preventDefault();
@@ -266,6 +308,92 @@ export default function App() {
       window.removeEventListener("focus", focus);
     };
   }, []);
+
+  function openTool(tool: WorkspaceTool) {
+    if (tool === "capture") run(quickCapture());
+    else if (tool === "daily") run(openDaily());
+    else setModal({ kind: tool });
+  }
+  const commands: AppCommand[] = [
+    {
+      id: "titles",
+      label: "Find a note by title or tag",
+      shortcut: "Ctrl P",
+      run: () => setModal({ kind: "search", query: "" }),
+    },
+    {
+      id: "contents",
+      label: "Search note contents",
+      shortcut: "Ctrl Shift P",
+      run: () => setModal({ kind: "contents" }),
+    },
+    {
+      id: "capture",
+      label: "Quick capture in Inbox",
+      shortcut: "Ctrl Shift N",
+      run: quickCapture,
+    },
+    {
+      id: "daily",
+      label: "Open today's note",
+      shortcut: "Ctrl Shift D",
+      run: openDaily,
+    },
+    { id: "workspace", label: "Open a workspace folder", run: openFolder },
+    {
+      id: "settings",
+      label: "Open settings",
+      shortcut: "Ctrl ,",
+      run: () => setModal({ kind: "settings" }),
+    },
+    { id: "save", label: "Save all notes", shortcut: "Ctrl S", run: flushAll },
+    {
+      id: "sidebar",
+      label: "Toggle sidebar",
+      run: () => setSidebar((s) => !s),
+    },
+    ...(workspace
+      ? ([
+          {
+            id: "new",
+            label: "Create a new note",
+            shortcut: "Ctrl N",
+            run: () => newNote(workspace.id, selectedFolder),
+          },
+          {
+            id: "lecture",
+            label: "New lecture note",
+            run: () => newLecture(workspace.id),
+          },
+          {
+            id: "templates",
+            label: "New note from template",
+            run: () => setModal({ kind: "templates" }),
+          },
+          {
+            id: "tasks",
+            label: "Show workspace tasks",
+            run: () => setModal({ kind: "tasks" }),
+          },
+          {
+            id: "projects",
+            label: "Projects and assignments table / board",
+            run: () => setModal({ kind: "projects" }),
+          },
+          {
+            id: "split",
+            label: "Toggle split pane",
+            shortcut: "Ctrl \\",
+            run: toggleSplit,
+          },
+          {
+            id: "refresh",
+            label: "Refresh workspace files",
+            run: () => refreshWorkspace(workspace.id),
+          },
+        ] satisfies AppCommand[])
+      : []),
+  ];
 
   function renderPane(path: string | null, pane: "primary" | "secondary") {
     if (!workspace) return null;
@@ -421,6 +549,7 @@ export default function App() {
             if (workspace) run(newNote(workspace.id, selectedFolder));
           }}
           onNewFolder={() => setModal({ kind: "folder" })}
+          onTool={openTool}
         />
       )}
       <main className="main-shell">
@@ -570,6 +699,21 @@ export default function App() {
         <span>Auto direction</span>
       </footer>
       <Suspense fallback={null}>
+        {modal?.kind === "contents" && (
+          <ContentSearchDialog onClose={closeModal} />
+        )}
+        {modal?.kind === "commands" && (
+          <CommandDialog commands={commands} onClose={closeModal} />
+        )}
+        {modal?.kind === "templates" && workspace && (
+          <TemplateDialog workspaceId={workspace.id} onClose={closeModal} />
+        )}
+        {modal?.kind === "tasks" && workspace && (
+          <TasksDialog workspaceId={workspace.id} onClose={closeModal} />
+        )}
+        {modal?.kind === "projects" && workspace && (
+          <ProjectsDialog workspaceId={workspace.id} onClose={closeModal} />
+        )}
         {modal?.kind === "settings" && <SettingsDialog onClose={closeModal} />}
         {modal?.kind === "search" && (
           <SearchDialog onClose={closeModal} initial={modal.query} />

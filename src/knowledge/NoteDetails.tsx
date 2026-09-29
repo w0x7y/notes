@@ -1,0 +1,137 @@
+import { useMemo, useSyncExternalStore } from "react";
+import { X } from "lucide-react";
+import type { NoteDocument } from "../domain/document";
+import { navigateTo, useApp } from "../domain/app-store";
+import { resolveNoteLink } from "../domain/links";
+import { analyzeNote } from "./model";
+import { useKnowledge } from "./index";
+import { PropertiesFields } from "./PropertiesFields";
+import "./note-details.css";
+
+export function NoteDetails({
+  document,
+  onClose,
+}: {
+  document: NoteDocument;
+  onClose: () => void;
+}) {
+  const snapshot = useSyncExternalStore(
+    document.subscribe,
+    document.getSnapshot,
+  );
+  const entries = useApp((state) => state.entries);
+  const workspace = useApp((state) =>
+    state.workspaces.find((item) => item.id === document.workspaceId),
+  );
+  const { notes, loading, errors } = useKnowledge();
+  const content = document.content;
+  const current = useMemo(
+    () =>
+      analyzeNote(
+        {
+          workspaceId: document.workspaceId,
+          workspaceName: workspace?.name ?? "",
+          color: workspace?.color ?? "",
+          path: snapshot.path,
+          title: snapshot.title,
+          kind: "note",
+          tags: [],
+          modified: 0,
+        },
+        content,
+      ),
+    [
+      document.workspaceId,
+      workspace?.name,
+      workspace?.color,
+      snapshot.path,
+      snapshot.title,
+      content,
+    ],
+  );
+  const backlinks = useMemo(
+    () =>
+      notes.flatMap((note) => {
+        if (
+          note.workspaceId === document.workspaceId &&
+          note.path === snapshot.path
+        )
+          return [];
+        const link = note.links.find(({ target }) => {
+          const result = resolveNoteLink(
+            target,
+            note.workspaceId,
+            note.path,
+            entries,
+          );
+          return (
+            result.kind === "found" &&
+            result.workspaceId === document.workspaceId &&
+            result.path === snapshot.path
+          );
+        });
+        return link ? [{ note, offset: link.offset }] : [];
+      }),
+    [notes, entries, document.workspaceId, snapshot.path],
+  );
+  return (
+    <aside className="note-details" aria-label="Note details">
+      <div className="note-details-header">
+        <strong>Note details</strong>
+        <button aria-label="Close note details" onClick={onClose}>
+          <X size={15} />
+        </button>
+      </div>
+      <section aria-label="Heading outline">
+        <h3>Outline</h3>
+        {!current.headings.length && (
+          <p className="muted">Headings will appear here.</p>
+        )}
+        {current.headings.map((heading) => (
+          <button
+            key={heading.offset}
+            className="note-details-link"
+            style={{ paddingInlineStart: 8 + (heading.level - 1) * 10 }}
+            onClick={() =>
+              navigateTo(document.workspaceId, snapshot.path, heading.offset)
+            }
+          >
+            <span dir="auto">{heading.text}</span>
+          </button>
+        ))}
+      </section>
+      <section aria-label="Note properties">
+        <h3>Properties</h3>
+        <PropertiesFields document={document} />
+      </section>
+      <section aria-label="Backlinks">
+        <h3>
+          Backlinks <span>{backlinks.length}</span>
+        </h3>
+        {loading && <p className="muted">Finding links…</p>}
+        {errors.length > 0 && (
+          <p className="muted">
+            Some notes could not be read. Backlinks may be incomplete.
+          </p>
+        )}
+        {!loading && !backlinks.length && (
+          <p className="muted">
+            No notes link here yet. Use [[ to link a note.
+          </p>
+        )}
+        {backlinks.map(({ note, offset }) => (
+          <button
+            className="note-details-link note-backlink"
+            key={`${note.workspaceId}:${note.path}`}
+            onClick={() => navigateTo(note.workspaceId, note.path, offset)}
+          >
+            <span dir="auto">{note.title}</span>
+            <small>
+              {note.workspaceName} · {note.path}
+            </small>
+          </button>
+        ))}
+      </section>
+    </aside>
+  );
+}

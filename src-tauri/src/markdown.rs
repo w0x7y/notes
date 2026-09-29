@@ -95,9 +95,29 @@ pub fn visible_segments(content: &str, transform: impl FnMut(&str) -> String) ->
     map_outside_code(content, transform, str::to_string)
 }
 
+/// Only a closed YAML block at the start is metadata. Preserve ordinary thematic
+/// breaks and unfinished Markdown rather than silently hiding the rest of a note.
+fn body_without_frontmatter(content: &str) -> &str {
+    let mut lines = content.split_inclusive('\n');
+    let Some(first) = lines.next() else {
+        return content;
+    };
+    if first != "---\n" && first != "---\r\n" {
+        return content;
+    }
+    let mut offset = first.len();
+    for line in lines {
+        offset += line.len();
+        if line.trim_end_matches(['\r', '\n']) == "---" {
+            return &content[offset..];
+        }
+    }
+    content
+}
+
 pub fn tags(content: &str) -> Vec<String> {
     let mut tags = Vec::new();
-    let visible = map_outside_code(content, str::to_string, |text| {
+    let visible = map_outside_code(body_without_frontmatter(content), str::to_string, |text| {
         text.chars()
             .map(|ch| if ch == '\n' { '\n' } else { ' ' })
             .collect()
@@ -115,7 +135,7 @@ pub fn tags(content: &str) -> Vec<String> {
 
 pub fn first_h1(content: &str) -> Option<String> {
     let mut fence = None;
-    for line in content.lines() {
+    for line in body_without_frontmatter(content).lines() {
         if code_line(line, &mut fence) {
             continue;
         }

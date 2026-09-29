@@ -1,3 +1,7 @@
+import {
+  WorkspaceTools,
+  type WorkspaceTool,
+} from "../knowledge/WorkspaceTools";
 import { useMemo, useState, type MouseEvent } from "react";
 import {
   ChevronDown,
@@ -53,6 +57,7 @@ type Props = {
   onSettings: () => void;
   onAppSettings: () => void;
   onSearch: (tag?: string) => void;
+  onTool: (tool: WorkspaceTool) => void;
   onNewNote: () => void;
   onNewFolder: () => void;
 };
@@ -216,6 +221,7 @@ export function Sidebar(props: Props) {
         </span>
         <kbd>Ctrl P</kbd>
       </button>
+      <WorkspaceTools onTool={props.onTool} />
       <div className="sidebar-section">
         <button
           className={`section-name ${!props.selectedFolder ? "selected-root" : ""}`}

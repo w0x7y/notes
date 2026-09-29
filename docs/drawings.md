@@ -35,9 +35,16 @@ individual drawing if a note contains multiple blocks.
 
 This is the app's own small drawing format. It does not import Excalidraw files
 or provide collaboration, connectors that follow shapes, image imports, grouping,
-or multiple selection. Other Markdown editors show the fenced JSON; SVG copies
-are the portable visual export. Icons, search, renaming, moving, and deleting work
-through the containing note.
+or multiple selection. Done and Ctrl+S also write an immutable SVG under
+`assets/drawings/` and add an ordinary relative Markdown image link after the
+editable block. Other Markdown editors can display this SVG, while retaining the
+source JSON. This app combines the source and fallback into one preview. Keep the
+assets folder with the notes when copying a workspace. Old SVG revisions remain
+on disk so copied references keep working; there is no automatic asset cleanup.
+Hand-edited JSON needs to be reopened and saved through Drawing to regenerate its
+preview. Moving a note between folders has the existing outgoing-relative-link
+limitation; reopening and saving the drawing rebuilds its relative preview link.
+Icons, search, renaming, moving, and deleting work through the containing note.
 
 Invalid drawing data and conflicting edits are rejected without replacing the
 source. A failed disk save keeps the drawing in the note buffer and exposes Retry.
@@ -46,7 +53,7 @@ and 2 million JSON characters. Coordinates serialize to two decimal places.
 
 ## Performance and verification
 
-No dependency was added. The editor and static canvas preview are separate lazy
+The original canvas implementation added no dependency; portable SVG exports now use a small native XML validator. The editor and static canvas preview are separate lazy
 imports. Ordinary Markdown notes do not load either. Pointer moves update an
 imperative canvas controller, with at most one pending animation frame. React,
 undo history, validation, JSON serialization, and autosave receive completed

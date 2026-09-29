@@ -9,6 +9,169 @@ fn service() -> (tempfile::TempDir, Service) {
 }
 
 #[test]
+fn drawing_svg_exports_are_immutable_bounded_and_path_safe() {
+    let (_config, service) = service();
+    let root = tempdir().unwrap();
+    let id = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"><rect x="1" y="2" width="20" height="30" stroke="#61AFEF" stroke-width="2" fill="none"/><text x="2" y="50" font-family="sans-serif" font-size="24" fill="#ABB2BF" dominant-baseline="text-before-edge" direction="rtl" unicode-bidi="plaintext">שלום &lt;script&gt; &amp; &quot;hello&quot;</text></svg>"##;
+    let path = service.write_drawing_svg(&id, svg).unwrap();
+    assert!(path.starts_with("assets/drawings/"));
+    assert_eq!(path.len(), "assets/drawings/".len() + 64 + 4);
+    assert_eq!(fs::read_to_string(root.path().join(&path)).unwrap(), svg);
+    assert_eq!(service.write_drawing_svg(&id, svg).unwrap(), path);
+    let next = service
+        .write_drawing_svg(&id, &svg.replace("100", "200"))
+        .unwrap();
+    assert_ne!(path, next);
+    fs::write(root.path().join(&path), "externally edited").unwrap();
+    assert!(service
+        .write_drawing_svg(&id, svg)
+        .unwrap_err()
+        .contains("refusing to overwrite"));
+    assert!(service
+        .write_drawing_svg(&id, &" ".repeat(4_000_001))
+        .is_err());
+    for unsafe_svg in [
+        "<svg><script>alert(1)</script></svg>",
+        "<svg onload=\"alert(1)\"/>",
+        "<svg><image href=\"https://example.com\"/></svg>",
+        "<svg><path fill=\"url(https://example.com)\"/></svg>",
+        "<!DOCTYPE svg [<!ENTITY x SYSTEM 'file:///etc/passwd'>]><svg><text>&x;</text></svg>",
+        "<svg><text>&unknown;</text></svg>",
+        "<svg><text></svg>",
+        "<svg></svg><svg/>",
+    ] {
+        assert!(
+            service.write_drawing_svg(&id, unsafe_svg).is_err(),
+            "accepted {unsafe_svg}"
+        );
+    }
+    let other = tempdir().unwrap();
+    let outside = tempdir().unwrap();
+    std::os::unix::fs::symlink(outside.path(), other.path().join("assets")).unwrap();
+    let other_id = service
+        .add_workspace(other.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    assert!(service.write_drawing_svg(&other_id, svg).is_err());
+    assert_eq!(fs::read_dir(outside.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn capture_workspace_is_reused_without_touching_existing_notes() {
+    let (config, service) = service();
+    let documents = tempdir().unwrap();
+    let first = service.ensure_capture_workspace(documents.path()).unwrap();
+    assert_eq!(first.workspace.name, "Quick Notes");
+    assert!(documents.path().join("Quick Notes/Inbox").is_dir());
+    assert!(documents.path().join("Quick Notes/Daily").is_dir());
+    let note = service.create_note(&first.workspace.id, "Inbox").unwrap();
+    let second = service.ensure_capture_workspace(documents.path()).unwrap();
+    assert_eq!(first.workspace.id, second.workspace.id);
+    assert!(second.entries.iter().any(|entry| entry.path == note.path));
+    drop(service);
+    let service = Service::new(config.path().to_path_buf()).unwrap();
+    assert_eq!(
+        service
+            .ensure_capture_workspace(documents.path())
+            .unwrap()
+            .workspace
+            .id,
+        first.workspace.id
+    );
+    service.remove_workspace(&first.workspace.id).unwrap();
+    assert!(service
+        .ensure_capture_workspace(documents.path())
+        .unwrap()
+        .entries
+        .iter()
+        .any(|entry| entry.path == note.path));
+}
+
+#[test]
+fn capture_workspace_rejects_symlinked_capture_folders() {
+    let (_config, service) = service();
+    let documents = tempdir().unwrap();
+    let outside = tempdir().unwrap();
+    fs::create_dir(documents.path().join("Quick Notes")).unwrap();
+    std::os::unix::fs::symlink(outside.path(), documents.path().join("Quick Notes/Inbox")).unwrap();
+    assert!(service.ensure_capture_workspace(documents.path()).is_err());
+    assert!(service.load_settings().unwrap().workspaces.is_empty());
+}
+
+#[test]
+fn yaml_comments_never_become_note_titles_or_inline_tags() {
+    use notes_lib::markdown::{first_h1, tags};
+    for newline in ["\n", "\r\n"] {
+        let content = [
+            "---",
+            "# keep this comment",
+            "subject: '#metadata'",
+            "status: todo",
+            "---",
+            "",
+            "# Actual lecture title",
+            "",
+            "#lecture #עברית",
+        ]
+        .join(newline);
+        assert_eq!(first_h1(&content).as_deref(), Some("Actual lecture title"));
+        assert_eq!(tags(&content), ["lecture", "עברית"]);
+        assert_eq!(
+            first_h1(&format!("---{newline}---{newline}# Empty properties")).as_deref(),
+            Some("Empty properties")
+        );
+    }
+    assert_eq!(
+        first_h1("---\n# metadata comment\nsubject: '#hidden'\n---"),
+        None
+    );
+    assert!(tags("---\n#hidden\n---").is_empty());
+    assert_eq!(
+        first_h1("---\n# Unfinished delimiter").as_deref(),
+        Some("Unfinished delimiter")
+    );
+    assert_eq!(
+        first_h1("Introduction\n---\n# Markdown title\n---").as_deref(),
+        Some("Markdown title")
+    );
+}
+
+#[test]
+fn autosave_and_scan_use_the_actual_heading_after_yaml_properties() {
+    let (_config, service) = service();
+    let root = tempdir().unwrap();
+    let id = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    let note = service.create_note(&id, "").unwrap();
+    let content = "---\n# keep this comment\nstatus: todo\nsubject: '#hidden'\n---\n\n# Linear algebra\n\n#lecture\n";
+    let saved = service
+        .save_note(&id, &note.path, content, &note.revision)
+        .unwrap();
+    assert_eq!(saved.path, "Linear algebra.md");
+    assert_eq!(
+        fs::read_to_string(root.path().join(&saved.path)).unwrap(),
+        content
+    );
+    let snapshot = service.scan_workspace(&id).unwrap();
+    let entry = snapshot
+        .entries
+        .iter()
+        .find(|entry| entry.path == saved.path)
+        .unwrap();
+    assert_eq!(entry.title, "Linear algebra");
+    assert_eq!(entry.tags, ["lecture"]);
+}
+
+#[test]
 fn scan_includes_notes_images_folders_and_tags_outside_code() {
     let (_config, service) = service();
     let root = tempdir().unwrap();

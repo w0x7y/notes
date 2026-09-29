@@ -1,3 +1,4 @@
+import { remapFavorite, forgetFavorites } from "../knowledge/library";
 import {
   defaultPreferences,
   preferencesSchema,
@@ -24,6 +25,12 @@ export const emptySession = (): Session => ({
   split: false,
 });
 type AppState = Settings & {
+  navigation: {
+    workspaceId: string;
+    path: string;
+    offset: number;
+    serial: number;
+  } | null;
   ready: boolean;
   entries: Record<string, Entry[]>;
   notice: string | null;
@@ -37,11 +44,13 @@ export const useApp = create<AppState>(() => ({
   sessions: {},
   appearances: {},
   toolbarVisible: false,
+  navigation: null,
   ready: false,
   entries: {},
   notice: null,
   focusedPane: "primary",
 }));
+let navigationSerial = 0;
 const documents = new Map<string, NoteDocument>();
 const loading = new Map<string, Promise<NoteDocument>>();
 let persistTimer: ReturnType<typeof setTimeout> | undefined;
@@ -162,7 +171,11 @@ export function openFile(
       : session.split && session.secondary === path
         ? "secondary"
         : requested;
-  useApp.setState({ activeWorkspaceId: id, focusedPane: target });
+  useApp.setState({
+    activeWorkspaceId: id,
+    focusedPane: target,
+    navigation: null,
+  });
   changeSession(id, (session) => ({
     ...session,
     tabs: session.tabs.includes(path) ? session.tabs : [...session.tabs, path],
@@ -203,6 +216,7 @@ function removeTab(id: string, currentPath: string): void {
 }
 
 function remapAppearance(id: string, previousPath: string, path: string): void {
+  remapFavorite(id, previousPath, path);
   useApp.setState((state) => {
     const entries = { ...state.appearances[id] };
     const appearance = entries[previousPath];
@@ -262,11 +276,7 @@ export async function renameImage(
       ),
     },
   }));
-  for (const rewrite of result.rewritten) {
-    documents
-      .get(key(rewrite.workspaceId, rewrite.path))
-      ?.receiveExternal(rewrite.content, rewrite.revision);
-  }
+  applyRewrites(result.rewritten);
   if (result.warnings.length) showError(result.warnings.join("\n"));
 }
 
@@ -287,6 +297,7 @@ export async function deleteEntry(
     document?.file.revision ?? null,
   );
   document?.dispose();
+  forgetFavorites(id, currentPath);
   documents.delete(key(id, currentPath));
   removeTab(id, currentPath);
   useApp.setState((state) => {
@@ -317,6 +328,7 @@ export async function removeWorkspace(id: string): Promise<void> {
   await Promise.all(workspaceDocuments.map((document) => document.flush()));
   await persistNow();
   const settings = await files.removeWorkspace(id);
+  forgetFavorites(id);
   for (const document of workspaceDocuments) {
     document.dispose();
     documents.delete(key(id, document.getSnapshot().path));
@@ -361,11 +373,7 @@ function saved(
     });
     return { entries: { ...state.entries, [id]: entries } };
   });
-  for (const rewrite of result.rewritten) {
-    documents
-      .get(key(rewrite.workspaceId, rewrite.path))
-      ?.receiveExternal(rewrite.content, rewrite.revision);
-  }
+  applyRewrites(result.rewritten);
   if (result.warnings.length) showError(result.warnings.join("\n"));
 }
 
@@ -466,11 +474,6 @@ async function refresh(id: string): Promise<void> {
   const snapshot = await files.scanWorkspace(id);
   if (!useApp.getState().workspaces.some((workspace) => workspace.id === id))
     return;
-  if (!sameEntries(useApp.getState().entries[id] ?? [], snapshot.entries)) {
-    useApp.setState((state) => ({
-      entries: { ...state.entries, [id]: snapshot.entries },
-    }));
-  }
   const openDocuments = [...documents.values()].filter(
     (document) => document.workspaceId === id && !document.dirty,
   );
@@ -484,6 +487,11 @@ async function refresh(id: string): Promise<void> {
       }
     }),
   );
+  if (!sameEntries(useApp.getState().entries[id] ?? [], snapshot.entries)) {
+    useApp.setState((state) => ({
+      entries: { ...state.entries, [id]: snapshot.entries },
+    }));
+  }
 }
 
 export function searchEntries(): SearchEntry[] {
@@ -527,4 +535,82 @@ export async function savePreferences(preferences: Preferences): Promise<void> {
   useApp.setState({ preferences: updated });
   for (const document of documents.values())
     document.setAutosaveDelay(updated.autosaveDelayMs);
+}
+
+export function peekDocument(
+  id: string,
+  path: string,
+): NoteDocument | undefined {
+  return documents.get(key(id, path));
+}
+export function navigateTo(id: string, path: string, offset = 0): void {
+  openFile(id, path);
+  useApp.setState({
+    navigation: {
+      workspaceId: id,
+      path,
+      offset,
+      serial: ++navigationSerial,
+    },
+  });
+}
+/** All generated notes share the normal document/save lifecycle. */
+export async function createContentNote(
+  id: string,
+  folder: string,
+  content: string,
+  fixedPath?: string,
+  open = true,
+): Promise<NoteDocument> {
+  const note = await files.createNote(id, folder);
+  const document = registerDocument(id, note);
+  saved(document, note.path, { ...note, rewritten: [], warnings: [] });
+  // Keep a failed generated note reachable; never discard its unsaved buffer.
+  try {
+    if (fixedPath) await renameNote(document, fixedPath);
+    document.editFromAction(content);
+    await document.flush();
+  } catch (error) {
+    openFile(id, document.getSnapshot().path);
+    throw error;
+  }
+  if (open) openFile(id, document.getSnapshot().path);
+  return document;
+}
+export async function registerCaptureWorkspace(): Promise<string> {
+  const snapshot = await files.ensureCaptureWorkspace();
+  useApp.setState((state) => ({
+    workspaces: [
+      ...state.workspaces.filter((w) => w.id !== snapshot.workspace.id),
+      snapshot.workspace,
+    ],
+    entries: { ...state.entries, [snapshot.workspace.id]: snapshot.entries },
+  }));
+  return snapshot.workspace.id;
+}
+
+function applyRewrites(rewrites: SaveResult["rewritten"]): void {
+  if (!rewrites.length) return;
+  for (const rewrite of rewrites) {
+    documents
+      .get(key(rewrite.workspaceId, rewrite.path))
+      ?.receiveExternal(rewrite.content, rewrite.revision);
+  }
+  useApp.setState((state) => {
+    const entries = { ...state.entries };
+    for (const rewrite of rewrites) {
+      entries[rewrite.workspaceId] = (entries[rewrite.workspaceId] ?? []).map(
+        (entry) =>
+          entry.path === rewrite.path
+            ? {
+                ...entry,
+                title: noteTitle(rewrite.path, rewrite.content),
+                tags: extractTags(rewrite.content),
+                modified: Math.max(Date.now(), entry.modified + 1),
+              }
+            : entry,
+      );
+    }
+    return { entries };
+  });
 }

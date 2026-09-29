@@ -30,6 +30,7 @@ libc = "0.2"
 percent-encoding = "2"
 pulldown-cmark = "0.13"
 trash = "5.2"
+quick-xml = "0.42"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

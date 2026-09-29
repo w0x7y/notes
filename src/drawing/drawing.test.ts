@@ -16,6 +16,7 @@ import { markdownBlocks } from "../editor/markdown";
 import { extractTags } from "../domain/notes";
 import { createDemoFiles } from "../platform/demo";
 import { NoteDocument } from "../domain/document";
+import { drawingPreviewLink } from "./preview-link";
 
 const rectangle: Shape = {
   id: "rect",
@@ -230,4 +231,63 @@ it("keeps drawings in the document buffer after save failure and retries them", 
   await document.flush();
   expect(document.getSnapshot().status.kind).toBe("saved");
   document.dispose();
+});
+
+it("exports a reusable SVG alongside editable Markdown and replaces its fallback on edits", async () => {
+  const files = createDemoFiles();
+  const svg = exportSvg([rectangle, text]);
+  const path = await files.writeDrawingSvg("algebra", svg);
+  expect(await files.writeDrawingSvg("algebra", svg)).toBe(path);
+  expect(path).toMatch(/^assets\/drawings\/[a-f0-9]{64}\.svg$/);
+  const image = await files.readImage("algebra", path);
+  expect(
+    new TextDecoder().decode(
+      Uint8Array.from(atob(image.data), (c) => c.charCodeAt(0)),
+    ),
+  ).toBe(svg);
+  const binding = new DrawingBinding("# Drawing note\n\n");
+  const preview = drawingPreviewLink("Lectures/Week 1/Diagram.md", path);
+  expect(preview).toContain("../../assets/drawings/");
+  const content = binding.update(
+    "# Drawing note\n\n",
+    [rectangle, text],
+    preview,
+  );
+  const blocks = markdownBlocks(content + "\nAfter the drawing.\n");
+  const drawing = blocks.find((block) => block.drawing);
+  expect(drawing?.source).toContain(preview.trim());
+  expect(
+    blocks.filter(
+      (block) => block.html.includes("data-local-src") && !block.drawing,
+    ),
+  ).toHaveLength(0);
+  expect(blocks.at(-1)?.source).toContain("After the drawing.");
+  const reopened = new DrawingBinding(content, drawing?.source);
+  const edited = reopened.update(content, [text]);
+  expect(edited).not.toContain("notes-drawing-preview");
+  expect(new DrawingBinding(edited).scene.shapes).toEqual([text]);
+  const updatedPath = await files.writeDrawingSvg("algebra", exportSvg([text]));
+  const updated = reopened.update(
+    edited,
+    [text],
+    drawingPreviewLink("Lectures/Diagram.md", updatedPath),
+  );
+  expect(updatedPath).not.toBe(path);
+  expect(updated).toContain(updatedPath);
+  expect(updated).not.toContain(path);
+  expect((await files.readImage("algebra", path)).data).toBe(image.data);
+});
+
+it("creates and reuses a dedicated capture workspace and preserves captured notes", async () => {
+  const files = createDemoFiles();
+  const first = await files.ensureCaptureWorkspace();
+  expect(first.workspace.name).toBe("Quick Notes");
+  expect(first.entries.map((entry) => entry.path)).toEqual(["Inbox", "Daily"]);
+  const note = await files.createNote(first.workspace.id, "Inbox");
+  const next = await files.ensureCaptureWorkspace();
+  expect(next.workspace.id).toBe(first.workspace.id);
+  expect(next.entries.some((entry) => entry.path === note.path)).toBe(true);
+  await files.removeWorkspace(first.workspace.id);
+  const reopened = await files.ensureCaptureWorkspace();
+  expect(reopened.entries.some((entry) => entry.path === note.path)).toBe(true);
 });

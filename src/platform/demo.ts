@@ -146,6 +146,44 @@ export function createDemoFiles(): FileService {
   });
   return {
     kind: "demo",
+    ensureCaptureWorkspace: async () => {
+      const id = "quick-notes";
+      if (!settings.workspaces.some((item) => item.id === id)) {
+        settings.workspaces.push({
+          id,
+          name: "Quick Notes",
+          path: "~/Documents/Quick Notes",
+          color: "#98c379",
+          icon: "inbox",
+        });
+      }
+      if (!folders.has(id)) folders.set(id, new Set());
+      folders.get(id)?.add("Inbox").add("Daily");
+      return scan(id);
+    },
+    writeDrawingSvg: async (id, svg) => {
+      workspace(id);
+      const bytes = new TextEncoder().encode(svg);
+      if (bytes.length > 4_000_000)
+        throw new Error("Drawing preview is too large.");
+      const digest = await crypto.subtle.digest("SHA-256", bytes);
+      const hash = [...new Uint8Array(digest)]
+        .map((byte) => byte.toString(16).padStart(2, "0"))
+        .join("");
+      const path = `assets/drawings/${hash}.svg`;
+      const chunks: string[] = [];
+      for (let offset = 0; offset < bytes.length; offset += 8192)
+        chunks.push(
+          String.fromCharCode(...bytes.subarray(offset, offset + 8192)),
+        );
+      images.set(`${id}:${path}`, {
+        path,
+        mime: "image/svg+xml",
+        data: btoa(chunks.join("")),
+      });
+      folders.get(id)?.add("assets").add("assets/drawings");
+      return path;
+    },
     savePreferences: async (preferences) => {
       const validated = preferencesSchema.parse(preferences);
       settings.preferences = { ...validated };

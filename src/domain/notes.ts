@@ -38,7 +38,10 @@ export function withBody(content: string, body: string): string {
 
 export function extractTags(content: string): string[] {
   const tags = new Set<string>();
-  for (const token of parser.parse(content, {})) {
+  for (const token of parser.parse(
+    content.slice(splitNote(content).metadata.length),
+    {},
+  )) {
     if (token.type !== "inline") continue;
     let insideLink = false;
     for (const child of token.children ?? []) {

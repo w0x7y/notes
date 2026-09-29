@@ -12,6 +12,8 @@ export function resolveNoteLink(
   entries: Record<string, Entry[]>,
 ): Resolution {
   let raw = target.split("#")[0] ?? "";
+  if (!raw && target.startsWith("#"))
+    return { kind: "found", workspaceId, path: source };
   const colon = raw.indexOf(":");
   const prefix = raw.slice(0, colon);
   const qualified = colon > 0 && Object.hasOwn(entries, prefix);

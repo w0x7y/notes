@@ -171,7 +171,7 @@ impl Preferences {
                 "Font name must be at most 100 characters without control characters".into(),
             );
         }
-        if !(300..=700).contains(&self.font_weight) || self.font_weight % 100 != 0 {
+        if !(300..=700).contains(&self.font_weight) || !self.font_weight.is_multiple_of(100) {
             return Err("Font weight must be 300, 400, 500, 600, or 700".into());
         }
         if !self.letter_spacing.is_finite() || !(-0.5..=3.0).contains(&self.letter_spacing) {

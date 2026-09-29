@@ -23,3 +23,9 @@ describe("portable note content", () => {
     ).toEqual(["exam", "לחזרה"]);
   });
 });
+
+it("does not index tags from YAML frontmatter", () => {
+  expect(
+    extractTags("---\ncomment: metadata #hidden\n---\n\n# Title\n\n#actual"),
+  ).toEqual(["actual"]);
+});

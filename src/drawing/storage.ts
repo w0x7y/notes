@@ -1,4 +1,5 @@
 import { emptyScene, parseScene, type Scene } from "./model";
+import { drawingPreviewSuffix } from "./preview-link";
 
 type DrawingBlock = { from: number; to: number; source: string; json: string };
 /** Scan only top-level fences, skipping drawing examples inside other fences. */
@@ -29,13 +30,16 @@ export function drawingBlocks(content: string): DrawingBlock[] {
         match[1].length >= fence.length &&
         !match[2]?.trim()
       ) {
-        if (fence.drawing)
+        if (fence.drawing) {
+          const end = offset + line.length;
+          const to = end + drawingPreviewSuffix(content.slice(end)).length;
           result.push({
             from: fence.from,
-            to: offset + line.length,
-            source: content.slice(fence.from, offset + line.length),
+            to,
+            source: content.slice(fence.from, to),
             json: content.slice(fence.body, offset),
           });
+        }
         fence = null;
       }
     }
@@ -75,8 +79,8 @@ export class DrawingBinding {
     this.source = block?.source ?? null;
     this.scene = block ? parseScene(block.json) : emptyScene();
   }
-  update(content: string, shapes: Scene["shapes"]): string {
-    const next = encodeDrawing({ ...this.scene, shapes });
+  update(content: string, shapes: Scene["shapes"], preview = ""): string {
+    const next = encodeDrawing({ ...this.scene, shapes }) + preview;
     if (this.source === null) {
       this.source = next;
       return (

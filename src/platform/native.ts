@@ -24,6 +24,10 @@ async function call<T>(
 
 export const nativeFiles: FileService = {
   kind: "native",
+  ensureCaptureWorkspace: () =>
+    call("ensure_capture_workspace", {}, snapshotSchema),
+  writeDrawingSvg: (workspaceId, svg) =>
+    call("write_drawing_svg", { workspaceId, svg }, z.string()),
   savePreferences: (preferences) =>
     call("save_preferences", { preferences }, preferencesSchema),
   removeWorkspace: (workspaceId) =>

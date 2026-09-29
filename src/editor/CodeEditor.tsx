@@ -14,6 +14,9 @@ import {
   historyKeymap,
   indentWithTab,
 } from "@codemirror/commands";
+import { autocompletion, completionKeymap } from "@codemirror/autocomplete";
+import { noteCompletions } from "./completions";
+import { searchEntries } from "../domain/app-store";
 import { bracketMatching, syntaxTree } from "@codemirror/language";
 import { markdown } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
@@ -40,6 +43,7 @@ export type Format =
 export type EditorHandle = {
   format: (format: Format) => void;
   focus: () => void;
+  jumpTo: (offset: number) => void;
 };
 
 const direction = ViewPlugin.fromClass(
@@ -148,6 +152,7 @@ type Props = {
   scrollTop?: number;
   autofocus?: boolean;
   label?: string;
+  note?: { workspaceId: string; path: string };
 };
 
 export const CodeEditor = forwardRef<EditorHandle, Props>(
@@ -166,6 +171,16 @@ export const CodeEditor = forwardRef<EditorHandle, Props>(
           if (editor.current) applyFormat(editor.current, format);
         },
         focus: () => editor.current?.focus(),
+        jumpTo: (offset) => {
+          const view = editor.current;
+          if (!view) return;
+          const position = Math.max(0, Math.min(offset, view.state.doc.length));
+          view.dispatch({
+            selection: { anchor: position },
+            effects: EditorView.scrollIntoView(position, { y: "center" }),
+          });
+          view.focus();
+        },
       }),
       [],
     );
@@ -178,6 +193,25 @@ export const CodeEditor = forwardRef<EditorHandle, Props>(
         bracketMatching(),
         markdown({ codeLanguages: languages }),
         oneDark,
+        autocompletion({
+          override: [
+            noteCompletions(() => {
+              const note = handlers.current.note;
+              return note
+                ? {
+                    ...note,
+                    notes: searchEntries(),
+                    readHeadings: async (id, path) => {
+                      const { getKnowledgeNote } = await import("../knowledge");
+                      return (await getKnowledgeNote(id, path)).headings;
+                    },
+                  }
+                : null;
+            }),
+          ],
+          defaultKeymap: false,
+          activateOnTyping: true,
+        }),
         settings.current.of(
           editorPreferenceExtensions(initialPreferences.current),
         ),
@@ -197,8 +231,20 @@ export const CodeEditor = forwardRef<EditorHandle, Props>(
             overflow: "visible",
           },
           "&.cm-focused": { outline: "none" },
+          ".cm-tooltip-autocomplete": {
+            background: "#21252b",
+            border: "1px solid #3e4451",
+            fontFamily: "var(--font-ui)",
+            fontSize: "13px",
+          },
+          ".cm-tooltip-autocomplete ul li[aria-selected]": {
+            background: "#2c313a",
+            color: "#abb2bf",
+          },
+          ".cm-completionDetail": { color: "#828997", marginLeft: "12px" },
         }),
         keymap.of([
+          ...completionKeymap,
           {
             key: "Mod-b",
             run: (view) => {

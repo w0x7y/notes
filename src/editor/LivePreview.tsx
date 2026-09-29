@@ -118,6 +118,10 @@ export const LivePreview = memo(function LivePreview({
             <CodeEditor
               ref={editorRef}
               value={block.source}
+              note={{
+                workspaceId: document.workspaceId,
+                path: document.getSnapshot().path,
+              }}
               autofocus
               label="Edit Markdown block"
               onChange={(text) =>

@@ -34,6 +34,11 @@ On NVIDIA/Wayland, startup applies `__NV_DISABLE_EXPLICIT_SYNC=1` unless explici
 - Remove a workspace through its settings without deleting its directory. Pending notes save first; failures keep the workspace open.
 - Ordinary `.md` files, optional folders, inline English/Hebrew tags.
 - Global fuzzy title/tag search, with the current workspace first. Combine terms, such as `vector #exam`.
+- Full-text search with matching snippets, workspace/folder/tag filters, and saved searches.
+- Note/heading autocomplete, backlinks, heading outline, pinned notes, and Markdown slash commands.
+- Command palette, quick capture and daily notes in a dedicated Quick Notes workspace.
+- Editable Markdown starter templates, workspace task overview, and YAML properties with table/board views. See [workflow details](docs/note-workflows.md).
+- Lightweight drawings with editable source and portable SVG previews. See [drawing controls and storage](docs/drawings.md).
 - Workspace-specific tabs and split panes, restored on restart. Middle-click a tab to close it after saving.
 - Raw Markdown editing, a toggleable formatting bar, and a preview whose paragraphs reveal editable Markdown when clicked.
 - Automatic paragraph direction for mixed Hebrew/English; code stays LTR.
@@ -48,6 +53,10 @@ On NVIDIA/Wayland, startup applies `__NV_DISABLE_EXPLICIT_SYNC=1` unless explici
 | --- | --- |
 | Ctrl+, | App settings |
 | Ctrl+P | Search all workspace titles and tags |
+| Ctrl+Shift+P | Search note contents |
+| Ctrl+K | Command palette |
+| Ctrl+Shift+N | Quick capture in Quick Notes/Inbox |
+| Ctrl+Shift+D | Open today's note in Quick Notes/Daily |
 | Ctrl+N | New note in the selected folder |
 | Ctrl+S | Save pending changes |
 | Ctrl+W | Close the focused note after saving |
@@ -68,7 +77,7 @@ cargo test
 cargo clippy --all-targets -- -D warnings
 ```
 
-Verified on 2026-09-29:
+Earlier baseline verification on 2026-09-29 (new workflow checks are documented in [docs/note-workflows.md](docs/note-workflows.md)):
 
 - 43 frontend tests and 49 native tests passed; TypeScript, clippy, and the native release build passed.
 - Browser interactions exercised new notes, title-driven names, autosave, Hebrew direction, editing a preview block, tag search, cross-workspace search navigation, the formatting bar, and split panes.

@@ -96,6 +96,8 @@ export interface FileService {
     >,
   ): Promise<void>;
   addWorkspace(path: string): Promise<WorkspaceSnapshot>;
+  ensureCaptureWorkspace(): Promise<WorkspaceSnapshot>;
+  writeDrawingSvg(workspaceId: string, svg: string): Promise<string>;
   updateWorkspace(workspace: Workspace): Promise<Workspace>;
   removeWorkspace(workspaceId: string): Promise<Settings>;
   setEntryAppearance(

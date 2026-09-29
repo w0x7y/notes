@@ -2,6 +2,7 @@ import MarkdownIt from "markdown-it";
 import taskLists from "markdown-it-task-lists";
 import { katex } from "@mdit/plugin-katex";
 import hljs from "highlight.js/lib/common";
+import { drawingPreviewSuffix } from "../drawing/preview-link";
 
 const parser = new MarkdownIt({
   html: false,
@@ -94,7 +95,17 @@ export function markdownBlocks(body: string): MarkdownBlock[] {
   const environment = {};
   const tokens = parser.parse(body, environment);
   for (const [index, token] of tokens.entries()) {
-    if (token.level === 0 && token.nesting !== -1 && token.map)
+    const previous = tokens[index - 1];
+    const preview =
+      previous?.type === "fence" &&
+      previous.info.trim() === "notes-drawing" &&
+      previous.map
+        ? drawingPreviewSuffix(
+            body.slice(offsets[previous.map[1]] ?? body.length),
+          )
+        : "";
+    // Treat the portable image and its editable scene as one preview block.
+    if (token.level === 0 && token.nesting !== -1 && token.map && !preview)
       starts.set(offsets[token.map[0]] ?? 0, index);
   }
   const sorted = [...starts.entries()]

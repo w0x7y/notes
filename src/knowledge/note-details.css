@@ -1,0 +1,63 @@
+.note-workarea {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+.note-workarea > .document-scroll {
+  min-width: 0;
+}
+.note-details {
+  width: 260px;
+  max-width: 42%;
+  flex: none;
+  overflow: auto;
+  border-inline-start: 1px solid var(--border);
+  background: var(--sidebar, #21252b);
+  font-size: 12px;
+}
+.note-details-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+}
+.note-details-header button {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+}
+.note-details section {
+  padding: 0 10px 16px;
+}
+.note-details h3 {
+  margin: 8px 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.note-details h3 span {
+  margin-inline-start: 4px;
+}
+.note-details p {
+  line-height: 1.5;
+}
+.note-details-link {
+  display: block;
+  width: 100%;
+  text-align: start;
+  border-radius: 3px;
+  padding: 6px 8px;
+  overflow-wrap: anywhere;
+}
+.note-backlink small {
+  display: block;
+  color: var(--muted);
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+.note-workarea .view-button[aria-pressed="true"],
+.view-controls .view-button[aria-pressed="true"] {
+  color: var(--blue, #61afef);
+}

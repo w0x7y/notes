@@ -91,6 +91,13 @@ export class NoteDocument {
     }, this.delay);
   }
 
+  /** Programmatic edits must refresh mounted source and preview editors. */
+  editFromAction(content: string): void {
+    if (content === this.content) return;
+    this.edit(content);
+    this.publish({ externalVersion: this.snapshot.externalVersion + 1 });
+  }
+
   flush(): Promise<void> {
     clearTimeout(this.timer);
     if (this.pending) return this.pending;
