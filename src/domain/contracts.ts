@@ -1,4 +1,9 @@
 import { z } from "zod";
+import {
+  preferencesSchema,
+  defaultPreferences,
+  type Preferences,
+} from "./preferences";
 
 export const workspaceSchema = z.object({
   id: z.string(),
@@ -55,6 +60,7 @@ export const sessionSchema = z.object({
   split: z.boolean(),
 });
 export const settingsSchema = z.object({
+  preferences: preferencesSchema.default(defaultPreferences),
   workspaces: z.array(workspaceSchema),
   activeWorkspaceId: z.string().nullable(),
   sessions: z.record(z.string(), sessionSchema),
@@ -82,6 +88,7 @@ export type SearchEntry = Entry & {
 export interface FileService {
   readonly kind: "native" | "demo";
   loadSettings(): Promise<Settings>;
+  savePreferences(preferences: Preferences): Promise<Preferences>;
   saveSessions(
     settings: Pick<
       Settings,

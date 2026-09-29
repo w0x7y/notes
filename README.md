@@ -26,7 +26,8 @@ On NVIDIA/Wayland, startup applies `__NV_DISABLE_EXPLICIT_SYNC=1` unless explici
 
 ## Included
 
-- Open folders as workspaces; customize their names, colors, and icons.
+- Open folders as workspaces; customize their names, colors, and icons. Sidebar folders start collapsed, including when switching back to a workspace.
+- App settings open from the sidebar or Ctrl+comma. Adjust editor font/size/spacing, wrapping, line numbers, tab size, spellcheck, reading width, default preview, autosave delay, search scope/order/limit, session restoration, focus refresh, and file ordering. Settings persist outside your notes; Reset to defaults is available before saving.
 - Workspace and icon menus use the app theme. Dialogs focus their first field on opening; menus support arrow keys and Escape without focus outlines.
 - Right-click a note or image to open it, split it, rename/move it, customize its icon/color, copy its path, or move it to Trash.
 - Right-click folders to customize their icon and name color. All 2,118 names in the installed free Lucide catalog are searchable and bundled offline; no account is needed. Workspace settings use the same picker. Colors can use a palette or a custom hex value.
@@ -45,6 +46,7 @@ On NVIDIA/Wayland, startup applies `__NV_DISABLE_EXPLICIT_SYNC=1` unless explici
 
 | Shortcut | Action |
 | --- | --- |
+| Ctrl+, | App settings |
 | Ctrl+P | Search all workspace titles and tags |
 | Ctrl+N | New note in the selected folder |
 | Ctrl+S | Save pending changes |
@@ -68,7 +70,7 @@ cargo clippy --all-targets -- -D warnings
 
 Verified on 2026-09-29:
 
-- 24 frontend tests and 40 native filesystem tests passed; TypeScript, clippy, and the native release build passed.
+- 43 frontend tests and 49 native tests passed; TypeScript, clippy, and the native release build passed.
 - Browser interactions exercised new notes, title-driven names, autosave, Hebrew direction, editing a preview block, tag search, cross-workspace search navigation, the formatting bar, and split panes.
 - The native release opened a temporary workspace on Hyprland, displayed its Markdown, created a note through Ctrl+N, saved typed content as `smoke.md`, and flushed the last keystroke when the window closed. The saved workspace session was inspected on disk. No personal note folder was used.
 - Browser checks also exercised middle-click closing, image rename/move and deletion, file/folder colors, workspace icons, icon search/pagination, and workspace removal. New regression tests cover delayed confirmations after automatic renames, pending edits before image-link rewriting, Trash failure, and metadata persistence.
@@ -78,10 +80,10 @@ Verified on 2026-09-29:
 ## Current limits
 
 - This is a first desktop build, without an installer, cloud sync, Vim mode, or other themes.
-- Workspace contents refresh when the window regains focus; there is no continuous filesystem watcher yet.
+- Workspace contents refresh when the window regains focus by default; this is configurable. There is no continuous filesystem watcher yet.
 - Incoming-link updates handle direct wiki links and inline Markdown destinations in registered workspaces. Reference-style destinations, escaped paths, and outgoing relative links inside a moved note are not rewritten. Link-update failures are reported separately from the successful rename.
 - Existing images are supported; clipboard/drop image insertion is intentionally absent. Image tabs accept the native service’s supported formats and size limit.
 - Conflicting unsaved text is kept in memory and can be saved as a copy; there is no recovery journal after a process or system crash. External programs can still race a save in the short interval between revision checking and atomic replacement.
-- The initial JavaScript bundle currently triggers Vite’s size warning. Preview and code-language modules load on demand; end-to-end latency and large-file profiling remain future work.
+- The initial JavaScript entry is about 47% smaller after splitting the editor, dialogs, and icon catalog. Some optional chunks still trigger Vite’s size warning. Local search, tree, preview, and scan measurements are in [docs/performance.md](docs/performance.md); end-to-end native input latency is not yet measured.
 
 Lucide and its Feather-derived icon license notices are included in `public/THIRD_PARTY_NOTICES.txt`, which is embedded in the desktop frontend build.

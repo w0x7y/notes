@@ -1107,3 +1107,282 @@ fn trash_failure_preserves_file_and_metadata() {
         appearance
     );
 }
+
+#[test]
+fn old_settings_receive_complete_preference_defaults() {
+    let config = tempdir().unwrap();
+    fs::write(
+        config.path().join("notes.json"),
+        r#"{"toolbarVisible":false}"#,
+    )
+    .unwrap();
+    let service = Service::new(config.path().to_path_buf()).unwrap();
+    let settings = serde_json::to_value(service.load_settings().unwrap()).unwrap();
+    assert_eq!(settings["toolbarVisible"], false);
+    assert_eq!(
+        settings["preferences"],
+        serde_json::json!({
+            "fontSize":15,"lineHeight":1.9,"editorFont":"mono","lineWrapping":true,
+            "lineNumbers":false,"spellcheck":false,"tabSize":2,"readableWidth":true,
+            "defaultPreview":false,"autosaveDelayMs":600,"searchScope":"all",
+            "currentWorkspaceFirst":true,"searchLimit":60,"restoreSession":true,
+            "refreshOnFocus":true,"sortFilesBy":"name"
+        })
+    );
+}
+
+#[test]
+fn preferences_persist_and_missing_fields_use_defaults() {
+    use notes_lib::model::Preferences;
+    let (config, service) = service();
+    let preferences: Preferences = serde_json::from_value(serde_json::json!({
+        "fontSize":24,"lineHeight":2.2,"editorFont":"sans","tabSize":8,
+        "autosaveDelayMs":5000,"searchScope":"current","searchLimit":200,
+        "sortFilesBy":"modified","refreshOnFocus":false
+    }))
+    .unwrap();
+    assert!(preferences.line_wrapping);
+    assert!(preferences.restore_session);
+    assert_eq!(
+        service.save_preferences(preferences.clone()).unwrap(),
+        preferences
+    );
+    drop(service);
+    let restarted = Service::new(config.path().to_path_buf()).unwrap();
+    assert_eq!(restarted.load_settings().unwrap().preferences, preferences);
+}
+
+#[test]
+fn invalid_preferences_never_replace_saved_or_in_memory_values() {
+    use notes_lib::model::Preferences;
+    let (config, service) = service();
+    service.save_preferences(Preferences::default()).unwrap();
+    let before = fs::read(config.path().join("notes.json")).unwrap();
+    for (field, values) in [
+        ("fontSize", vec![11.0_f64, 25.0, 15.5]),
+        ("lineHeight", vec![1.29, 2.21]),
+        ("tabSize", vec![0.0, 3.0, 9.0]),
+        ("autosaveDelayMs", vec![199.0, 5001.0]),
+        ("searchLimit", vec![19.0, 201.0]),
+    ] {
+        for value in values {
+            let value = if value.fract() == 0.0 {
+                serde_json::json!(value as u64)
+            } else {
+                serde_json::json!(value)
+            };
+            let input = serde_json::json!({field: value});
+            if let Ok(preferences) = serde_json::from_value::<Preferences>(input) {
+                assert!(
+                    service.save_preferences(preferences).is_err(),
+                    "{field}: {value}"
+                );
+            }
+        }
+    }
+    for field in ["editorFont", "searchScope", "sortFilesBy"] {
+        assert!(
+            serde_json::from_value::<Preferences>(serde_json::json!({field:"invalid"})).is_err()
+        );
+    }
+    for line_height in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert!(service
+            .save_preferences(Preferences {
+                line_height,
+                ..Preferences::default()
+            })
+            .is_err());
+    }
+    assert_eq!(
+        service.load_settings().unwrap().preferences,
+        Preferences::default()
+    );
+    assert_eq!(fs::read(config.path().join("notes.json")).unwrap(), before);
+}
+
+#[test]
+fn failed_preference_persistence_keeps_previous_preferences() {
+    use notes_lib::model::Preferences;
+    let (config, service) = service();
+    service.save_preferences(Preferences::default()).unwrap();
+    fs::remove_file(config.path().join("notes.json")).unwrap();
+    fs::create_dir(config.path().join("notes.json")).unwrap();
+    assert!(service
+        .save_preferences(Preferences {
+            font_size: 20,
+            ..Preferences::default()
+        })
+        .is_err());
+    assert_eq!(
+        service.load_settings().unwrap().preferences,
+        Preferences::default()
+    );
+}
+
+#[test]
+fn scan_refreshes_external_edits_additions_deletions_and_renames() {
+    let (_config, service) = service();
+    let root = tempdir().unwrap();
+    let path = root.path().join("a.md");
+    fs::write(&path, "# First\n#before").unwrap();
+    let id = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    let stale_revision = service.read_note(&id, "a.md").unwrap().revision;
+    let original_modified = fs::metadata(&path).unwrap().modified().unwrap();
+    fs::write(&path, "# Other\n#afterx").unwrap(); // Same byte length.
+    fs::File::options()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_times(fs::FileTimes::new().set_modified(original_modified))
+        .unwrap();
+    let snapshot = service.scan_workspace(&id).unwrap();
+    assert_eq!(snapshot.entries[0].title, "Other");
+    assert_eq!(snapshot.entries[0].tags, ["afterx"]);
+    assert!(service
+        .save_note(&id, "a.md", "overwrite", &stale_revision)
+        .is_err());
+    fs::rename(&path, root.path().join("b.md")).unwrap();
+    fs::write(root.path().join("c.md"), "# New").unwrap();
+    let snapshot = service.scan_workspace(&id).unwrap();
+    assert_eq!(
+        snapshot
+            .entries
+            .iter()
+            .map(|entry| entry.path.as_str())
+            .collect::<Vec<_>>(),
+        ["b.md", "c.md"]
+    );
+    fs::remove_file(root.path().join("b.md")).unwrap();
+    let snapshot = service.scan_workspace(&id).unwrap();
+    assert_eq!(snapshot.entries.len(), 1);
+    assert_eq!(snapshot.entries[0].title, "New");
+}
+
+#[test]
+fn scan_after_native_save_rename_and_link_rewrite_uses_fresh_metadata() {
+    let (_config, service) = service();
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("a.md"), "# First\n#before").unwrap();
+    fs::write(root.path().join("reference.md"), "# [[a]]").unwrap();
+    let id = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    let note = service.read_note(&id, "a.md").unwrap();
+    let saved = service
+        .save_note(&id, "a.md", "# Second\n#after", &note.revision)
+        .unwrap();
+    let snapshot = service.scan_workspace(&id).unwrap();
+    assert_eq!(snapshot.entries[0].title, "Second");
+    assert_eq!(snapshot.entries[0].tags, ["after"]);
+    service
+        .rename_note(&id, "a.md", "b", &saved.revision)
+        .unwrap();
+    let snapshot = service.scan_workspace(&id).unwrap();
+    assert_eq!(snapshot.entries[0].path, "b.md");
+    assert_eq!(snapshot.entries[1].title, "[[b]]");
+}
+
+#[test]
+fn scan_cache_isolated_by_workspace_path() {
+    let (_config, service) = service();
+    let roots = [tempdir().unwrap(), tempdir().unwrap()];
+    let mut ids = Vec::new();
+    for (index, root) in roots.iter().enumerate() {
+        fs::write(root.path().join("a.md"), format!("# Workspace {index}")).unwrap();
+        ids.push(
+            service
+                .add_workspace(root.path().to_str().unwrap())
+                .unwrap()
+                .workspace
+                .id,
+        );
+    }
+    for (index, id) in ids.iter().enumerate() {
+        assert_eq!(
+            service.scan_workspace(id).unwrap().entries[0].title,
+            format!("Workspace {index}")
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn slow_scan_does_not_block_note_saves_or_other_workspace_scans() {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::OpenOptionsExt;
+    use std::sync::{mpsc, Arc};
+    use std::time::{Duration, Instant};
+
+    let (_config, service) = service();
+    let service = Arc::new(service);
+    let root = tempdir().unwrap();
+    let other = tempdir().unwrap();
+    fs::write(root.path().join("a.md"), "# Original").unwrap();
+    fs::write(other.path().join("other.md"), "# Other").unwrap();
+    let id = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    let other_id = service
+        .add_workspace(other.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    let revision = service.read_note(&id, "a.md").unwrap().revision;
+    let fifo_path = root.path().join("slow.md");
+    let fifo_name = CString::new(fifo_path.as_os_str().as_bytes()).unwrap();
+    // A FIFO deterministically holds the scan inside its disk read until this test releases it.
+    assert_eq!(unsafe { libc::mkfifo(fifo_name.as_ptr(), 0o600) }, 0);
+    let scan_service = service.clone();
+    let scan_id = id.clone();
+    let scan = std::thread::spawn(move || scan_service.scan_workspace(&scan_id));
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let fifo_writer = loop {
+        match fs::OpenOptions::new()
+            .write(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(&fifo_path)
+        {
+            Ok(writer) => break writer,
+            Err(error)
+                if error.raw_os_error() == Some(libc::ENXIO) && Instant::now() < deadline =>
+            {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            Err(error) => panic!("scan did not reach the slow read: {error}"),
+        }
+    };
+    let (sender, receiver) = mpsc::channel();
+    let save_service = service.clone();
+    let save = std::thread::spawn(move || {
+        let result = save_service.save_note(&id, "a.md", "# Saved", &revision);
+        sender.send(result).unwrap();
+    });
+    let (other_sender, other_receiver) = mpsc::channel();
+    let other_scan = std::thread::spawn(move || {
+        other_sender
+            .send(service.scan_workspace(&other_id))
+            .unwrap();
+    });
+    let saved_while_scan_blocked = receiver.recv_timeout(Duration::from_secs(1));
+    let other_scanned_while_blocked = other_receiver.recv_timeout(Duration::from_secs(1));
+    // Release the scan before asserting so a failing test always joins all its workers.
+    drop(fifo_writer);
+    scan.join().unwrap().unwrap();
+    save.join().unwrap();
+    other_scan.join().unwrap();
+    assert!(saved_while_scan_blocked.unwrap().is_ok());
+    assert!(other_scanned_while_blocked.unwrap().is_ok());
+    assert_eq!(
+        fs::read_to_string(root.path().join("a.md")).unwrap(),
+        "# Saved"
+    );
+}

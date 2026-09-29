@@ -1026,3 +1026,18 @@ button[aria-pressed="true"] {
 .remove-workspace {
   margin-right: auto;
 }
+
+.app-settings-button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px;
+  padding: 7px 8px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+.app-settings-button kbd {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 10px;
+}

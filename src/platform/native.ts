@@ -1,3 +1,4 @@
+import { preferencesSchema } from "../domain/preferences";
 import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
 import {
@@ -23,6 +24,8 @@ async function call<T>(
 
 export const nativeFiles: FileService = {
   kind: "native",
+  savePreferences: (preferences) =>
+    call("save_preferences", { preferences }, preferencesSchema),
   removeWorkspace: (workspaceId) =>
     call("remove_workspace", { workspaceId }, settingsSchema),
   setEntryAppearance: (workspaceId, path, appearance) =>

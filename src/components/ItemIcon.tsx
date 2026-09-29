@@ -1,13 +1,15 @@
 import { useEffect, useState, type ComponentType } from "react";
 import {
   BookOpen,
+  Book,
+  Code,
+  Briefcase,
   FileText,
   Folder,
   FolderOpen,
   Image,
   type LucideProps,
 } from "lucide-react";
-import dynamicIconImports from "lucide-react/dynamicIconImports.mjs";
 
 type Fallback = "file" | "image" | "folder" | "folder-open" | "workspace";
 type IconComponent = ComponentType<LucideProps>;
@@ -32,39 +34,32 @@ const legacyNames: Record<string, string> = {
   work: "briefcase",
 };
 
-const loaded = new Map<string, IconComponent>();
+const loaded = new Map<string, IconComponent>([
+  ["file-text", FileText],
+  ["image", Image],
+  ["folder", Folder],
+  ["folder-open", FolderOpen],
+  ["book-open", BookOpen],
+  ["book", Book],
+  ["code", Code],
+  ["briefcase", Briefcase],
+]);
 const loading = new Map<string, Promise<IconComponent>>();
-
 function iconName(name: string | null | undefined, fallback: Fallback): string {
-  const candidate = name
-    ? (legacyNames[name] ?? name)
-    : fallbackNames[fallback];
-  return Object.hasOwn(dynamicIconImports, candidate)
-    ? candidate
-    : fallbackNames[fallback];
+  return name ? (legacyNames[name] ?? name) : fallbackNames[fallback];
 }
-
 function loadIcon(name: string): Promise<IconComponent> {
   const cached = loaded.get(name);
   if (cached) return Promise.resolve(cached);
   const pending = loading.get(name);
   if (pending) return pending;
-  // The package owns this catalog. The ownership check in iconName makes
-  // the indexed access safe for names persisted in older settings files.
-  const request = dynamicIconImports[
-    name as keyof typeof dynamicIconImports
-  ]().then(
-    (module) => {
-      const component: IconComponent = module.default;
-      loaded.set(name, component);
-      loading.delete(name);
-      return component;
-    },
-    (error: unknown) => {
-      loading.delete(name);
-      throw error;
-    },
-  );
+  const request = import("./icon-catalog")
+    .then((module) => module.loadCatalogIcon(name))
+    .then((Component) => {
+      loaded.set(name, Component);
+      return Component;
+    })
+    .finally(() => loading.delete(name));
   loading.set(name, request);
   return request;
 }
@@ -92,6 +87,7 @@ export function ItemIcon({
 
   useEffect(() => {
     let mounted = true;
+    if (loaded.has(resolvedName) && active?.name === resolvedName) return;
     void loadIcon(resolvedName).then(
       (Component) => {
         if (mounted) setActive({ name: resolvedName, Component });

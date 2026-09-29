@@ -1,4 +1,4 @@
-import { useState, type MouseEvent } from "react";
+import { useMemo, useState, type MouseEvent } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -14,13 +14,15 @@ import {
   Trash2,
   Search,
   Settings2,
+  Settings,
 } from "lucide-react";
 import { ItemIcon } from "./ItemIcon";
 import type { Appearance, Entry, Workspace } from "../domain/contracts";
 import { MenuButton, PopupMenu, type MenuAnchor } from "./PopupMenu";
-import { run } from "../domain/app-store";
+import { buildFileTree } from "../domain/file-tree";
+import { run, useApp } from "../domain/app-store";
 import { copyText } from "../platform";
-import { basename, parentFolder } from "../domain/notes";
+import { basename } from "../domain/notes";
 
 export function WorkspaceIcon({
   icon,
@@ -48,6 +50,7 @@ type Props = {
   onWorkspace: (id: string) => void;
   onAddWorkspace: () => void;
   onSettings: () => void;
+  onAppSettings: () => void;
   onSearch: (tag?: string) => void;
   onNewNote: () => void;
   onNewFolder: () => void;
@@ -55,21 +58,15 @@ type Props = {
 
 function FolderNode({
   path,
-  entries,
+  tree,
   ...props
-}: { path: string; entries: Entry[] } & Pick<
+}: { path: string; tree: ReadonlyMap<string, Entry[]> } & Pick<
   Props,
   "active" | "selectedFolder" | "onFolder" | "onOpen" | "appearances"
 > & {
     onContextMenu: (event: MouseEvent<HTMLButtonElement>, entry: Entry) => void;
   }) {
-  const children = entries
-    .filter((entry) => parentFolder(entry.path) === path)
-    .sort(
-      (a, b) =>
-        Number(b.kind === "folder") - Number(a.kind === "folder") ||
-        a.path.localeCompare(b.path),
-    );
+  const children = tree.get(path) ?? [];
   return (
     <div className={path ? "tree-nested" : "tree-root"}>
       {children.map((entry) =>
@@ -78,7 +75,7 @@ function FolderNode({
             key={entry.path}
             path={entry.path}
             entry={entry}
-            entries={entries}
+            tree={tree}
             {...props}
           />
         ) : (
@@ -111,7 +108,11 @@ function FolderNode({
 }
 
 function FolderBranch(
-  props: { path: string; entries: Entry[]; entry: Entry } & Pick<
+  props: {
+    path: string;
+    tree: ReadonlyMap<string, Entry[]>;
+    entry: Entry;
+  } & Pick<
     Props,
     "active" | "selectedFolder" | "onFolder" | "onOpen" | "appearances"
   > & {
@@ -121,7 +122,7 @@ function FolderBranch(
       ) => void;
     },
 ) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   return (
     <div>
       <button
@@ -158,8 +159,18 @@ export function Sidebar(props: Props) {
     entry: Entry;
     anchor: MenuAnchor;
   } | null>(null);
-  const tags = [...new Set(props.entries.flatMap((entry) => entry.tags))].sort(
-    (a, b) => a.localeCompare(b),
+  const searchScope = useApp((state) => state.preferences.searchScope);
+  const sort = useApp((state) => state.preferences.sortFilesBy);
+  const tree = useMemo(
+    () => buildFileTree(props.entries, sort),
+    [props.entries, sort],
+  );
+  const tags = useMemo(
+    () =>
+      [...new Set(props.entries.flatMap((entry) => entry.tags))].sort((a, b) =>
+        a.localeCompare(b),
+      ),
+    [props.entries],
   );
   return (
     <aside className="sidebar">
@@ -204,7 +215,11 @@ export function Sidebar(props: Props) {
       </div>
       <button className="sidebar-search" onClick={() => props.onSearch()}>
         <Search size={15} />
-        <span>Search all notes</span>
+        <span>
+          {searchScope === "current"
+            ? "Search this workspace"
+            : "Search all notes"}
+        </span>
         <kbd>Ctrl P</kbd>
       </button>
       <div className="sidebar-section">
@@ -241,7 +256,7 @@ export function Sidebar(props: Props) {
           <FolderNode
             key={props.workspace?.id}
             path=""
-            entries={props.entries}
+            tree={tree}
             appearances={props.appearances}
             active={props.active}
             selectedFolder={props.selectedFolder}
@@ -346,6 +361,16 @@ export function Sidebar(props: Props) {
           ]}
         />
       )}
+      <button
+        className="app-settings-button"
+        onClick={props.onAppSettings}
+        aria-label="App settings"
+        title="App settings (Ctrl+,)"
+      >
+        <Settings size={15} />
+        <span>Settings</span>
+        <kbd>Ctrl ,</kbd>
+      </button>
       <div className="workspace-path" title={props.workspace?.path}>
         {props.workspace?.path ?? "Local Markdown notes"}
       </div>

@@ -1,5 +1,13 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import {
+  memo,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import DOMPurify from "dompurify";
+import "katex/dist/katex.min.css";
 import type { NoteDocument } from "../domain/document";
 import { relativePath, splitNote, withBody } from "../domain/notes";
 import { useApp, showError } from "../domain/app-store";
@@ -14,12 +22,15 @@ type Props = {
   onLink: (target: string) => void;
 };
 
-export function LivePreview({
+export const LivePreview = memo(function LivePreview({
   document,
   externalVersion,
   editorRef,
   onLink,
 }: Props) {
+  const fontSize = useApp((state) => state.preferences.fontSize);
+  const lineHeight = useApp((state) => state.preferences.lineHeight);
+  const editorFont = useApp((state) => state.preferences.editorFont);
   const [body, setBody] = useState(() => splitNote(document.content).body);
   const [active, setActive] = useState<number | null>(null);
   const host = useRef<HTMLDivElement>(null);
@@ -27,7 +38,18 @@ export function LivePreview({
     setBody(splitNote(document.content).body);
     setActive(null);
   }, [document, externalVersion]);
-  const blocks = markdownBlocks(body);
+  const blocks = useMemo(
+    () =>
+      markdownBlocks(body).map((block) => ({
+        ...block,
+        html:
+          DOMPurify.sanitize(block.html, {
+            ADD_ATTR: ["data-note-target", "data-local-src", "dir"],
+            ADD_TAGS: ["math", "semantics", "annotation"],
+          }) || '<p class="preview-placeholder">Click to start writing…</p>',
+      })),
+    [body],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -73,7 +95,16 @@ export function LivePreview({
     setActive(null);
   };
   return (
-    <div className="live-preview" ref={host}>
+    <div
+      className="live-preview"
+      ref={host}
+      style={{
+        fontSize,
+        lineHeight,
+        fontFamily:
+          editorFont === "mono" ? "var(--font-mono)" : "var(--font-ui)",
+      }}
+    >
       {blocks.map((block, index) =>
         active === index ? (
           <div className="preview-source" key={index}>
@@ -121,12 +152,7 @@ export function LivePreview({
               setActive(index);
             }}
             dangerouslySetInnerHTML={{
-              __html:
-                DOMPurify.sanitize(block.html, {
-                  ADD_ATTR: ["data-note-target", "data-local-src", "dir"],
-                  ADD_TAGS: ["math", "semantics", "annotation"],
-                }) ||
-                '<p class="preview-placeholder">Click to start writing…</p>',
+              __html: block.html,
             }}
           />
         ),
@@ -136,4 +162,4 @@ export function LivePreview({
       </div>
     </div>
   );
-}
+});

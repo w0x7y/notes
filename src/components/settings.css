@@ -1,0 +1,142 @@
+.settings-dialog {
+  width: min(770px, 94vw);
+}
+.settings-layout {
+  display: grid;
+  grid-template-columns: 135px minmax(0, 1fr);
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.settings-nav {
+  padding: 14px 8px;
+  background: var(--sidebar);
+  border-right: 1px solid #3e4452;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.settings-nav button {
+  padding: 9px 10px;
+  text-align: left;
+  border-radius: 3px;
+  font-size: 12px;
+}
+.settings-nav button[aria-current] {
+  background: #2c313a;
+  color: var(--bright);
+}
+.settings-content {
+  padding: 18px 22px;
+  min-width: 0;
+  min-height: 350px;
+}
+.settings-content h3 {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--bright);
+}
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  min-height: 43px;
+  padding: 8px 0;
+  border-bottom: 1px solid #303640;
+  font-size: 12px;
+}
+.setting-label {
+  color: var(--bright);
+}
+.setting-row p {
+  font-size: 11px;
+  line-height: 1.5;
+  margin: 4px 0 0;
+  max-width: 260px;
+}
+.setting-switch {
+  width: 29px;
+  height: 17px;
+  border-radius: 10px;
+  background: #4b5263;
+  padding: 3px;
+  flex: none;
+}
+.setting-switch span {
+  display: block;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #abb2bf;
+}
+.setting-switch[aria-checked="true"] {
+  background: #4478a0;
+}
+.setting-switch[aria-checked="true"] span {
+  background: #e6eff7;
+  transform: translateX(12px);
+}
+.setting-range {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+.setting-range input {
+  width: 100px;
+  accent-color: #61afef;
+}
+.setting-range output {
+  width: 35px;
+  text-align: right;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.setting-row .menu-control {
+  min-width: 130px;
+}
+.settings-note {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.7;
+  margin-top: 18px;
+}
+.settings-actions {
+  padding: 13px 18px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid #3e4452;
+}
+.settings-error {
+  margin: 0 18px 12px;
+}
+.shortcut-list {
+  margin: 0;
+  font-size: 12px;
+}
+.shortcut-list div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 0;
+  border-bottom: 1px solid #303640;
+}
+.shortcut-list dd {
+  margin: 0;
+}
+@media (max-width: 650px) {
+  .settings-layout {
+    grid-template-columns: 100px minmax(0, 1fr);
+  }
+  .settings-content {
+    padding: 15px 12px;
+  }
+  .setting-row {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+}

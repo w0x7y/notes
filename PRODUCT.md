@@ -21,6 +21,8 @@ A student and developer replacing their Obsidian workflow with a focused, keyboa
 - Existing folders open as workspaces, identified by a color and icon in a sidebar dropdown.
 - Regular Markdown files remain on disk; optional folders and inline English or Hebrew tags organize notes.
 - Global fuzzy search matches titles and tags, with current-workspace results first. No full-text search in v1.
+- Folders start collapsed when opening or switching workspaces.
+- App settings support editor appearance/behavior, autosave timing, title/tag search scope and order, and workspace/session behavior. They persist separately from notes and open with Ctrl+comma.
 - Each workspace remembers its own tabs and split-pane layout. Middle-click closes a tab after saving.
 - Notes, images, and folders can each use a custom icon and name color. The complete installed free Lucide catalog is searchable and bundled offline without an account. Workspaces use the same icon picker.
 - File context menus rename/move notes and images, and delete them by moving them to desktop Trash.

@@ -15,6 +15,7 @@ export function SearchDialog({
   const [selected, setSelected] = useState(0);
   const entries = useApp((state) => state.entries);
   const workspaces = useApp((state) => state.workspaces);
+  const preferences = useApp((state) => state.preferences);
   const current = useApp((state) => state.activeWorkspaceId);
   const index = useMemo(
     () =>
@@ -29,8 +30,20 @@ export function SearchDialog({
     [entries, workspaces],
   );
   const results = useMemo(
-    () => searchNotes(index, query, current).slice(0, 60),
-    [index, query, current],
+    () =>
+      searchNotes(index, query, current, {
+        scope: preferences.searchScope,
+        currentWorkspaceFirst: preferences.currentWorkspaceFirst,
+        limit: preferences.searchLimit,
+      }),
+    [
+      index,
+      query,
+      current,
+      preferences.searchScope,
+      preferences.currentWorkspaceFirst,
+      preferences.searchLimit,
+    ],
   );
   function choose(position: number) {
     const result = results[position];
@@ -41,7 +54,11 @@ export function SearchDialog({
   }
   return (
     <Dialog
-      title="Search all notes"
+      title={
+        preferences.searchScope === "current"
+          ? "Search this workspace"
+          : "Search all notes"
+      }
       className="search-dialog"
       onClose={onClose}
     >
@@ -122,7 +139,13 @@ export function SearchDialog({
         )}
       </div>
       <footer className="dialog-footer">
-        <span>Current workspace first</span>
+        <span>
+          {preferences.searchScope === "current"
+            ? "Current workspace only"
+            : preferences.currentWorkspaceFirst
+              ? "Current workspace first"
+              : "All workspaces"}
+        </span>
         <span>
           <kbd>↑↓</kbd> navigate <kbd>Enter</kbd> open <kbd>Esc</kbd> close
         </span>

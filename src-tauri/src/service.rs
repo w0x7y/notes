@@ -1,12 +1,13 @@
-use crate::markdown::{first_h1, rewrite_links, tags, LinkRewrite};
+use crate::markdown::{first_h1, rewrite_links, LinkRewrite};
 use crate::model::{
-    Appearance, DeleteResult, Entry, NoteFile, RenameImageResult, Rewrite, SaveResult, Session,
-    Settings, Snapshot, Stored, Workspace,
+    Appearance, DeleteResult, Entry, NoteFile, Preferences, RenameImageResult, Rewrite, SaveResult,
+    Session, Settings, Snapshot, Stored, Workspace,
 };
 use crate::pathing::{clean_filename, normalized_relative, relative, resolve, unique_file};
+use crate::scan_cache::ScanCache;
 use base64::Engine;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -18,6 +19,7 @@ use walkdir::WalkDir;
 pub struct Service {
     config_file: PathBuf,
     state: Mutex<Stored>,
+    scan_cache: ScanCache,
     trash: Arc<dyn Trash>,
 }
 
@@ -148,7 +150,7 @@ impl Service {
         fs::create_dir_all(&config_dir)
             .map_err(|e| err("Cannot create app config directory", e))?;
         let config_file = config_dir.join("notes.json");
-        let state = if config_file.exists() {
+        let state: Stored = if config_file.exists() {
             serde_json::from_slice(
                 &fs::read(&config_file).map_err(|e| err("Cannot read settings", e))?,
             )
@@ -156,11 +158,25 @@ impl Service {
         } else {
             Stored::default()
         };
+        state.settings.preferences.validate()?;
         Ok(Self {
             config_file,
             state: Mutex::new(state),
+            scan_cache: ScanCache::default(),
             trash,
         })
+    }
+    fn write_note_file(&self, path: &Path, bytes: &[u8]) -> Result<(), String> {
+        // Do not wait on the cache between revision validation and the actual write.
+        let result = atomic_write(path, bytes);
+        self.scan_cache.invalidate(path);
+        result
+    }
+    fn move_file(&self, source: &Path, target: &Path) -> Result<(), String> {
+        let result = move_without_overwrite(source, target);
+        self.scan_cache.invalidate(source);
+        self.scan_cache.invalidate(target);
+        result
     }
     fn persist(&self, state: &Stored) -> Result<(), String> {
         atomic_write(
@@ -176,6 +192,16 @@ impl Service {
             .settings
             .clone())
     }
+    pub fn save_preferences(&self, preferences: Preferences) -> Result<Preferences, String> {
+        preferences.validate()?;
+        let mut state = self.state.lock().map_err(|_| "Settings lock failed")?;
+        let mut next = state.clone();
+        next.settings.preferences = preferences.clone();
+        self.persist(&next)?;
+        *state = next;
+        Ok(preferences)
+    }
+
     pub fn set_entry_appearance(
         &self,
         id: &str,
@@ -224,7 +250,7 @@ impl Service {
 
     pub fn remove_workspace(&self, id: &str) -> Result<Settings, String> {
         let mut state = self.state.lock().map_err(|_| "Settings lock failed")?;
-        workspace(&state.settings, id)?;
+        let root = PathBuf::from(&workspace(&state.settings, id)?.path);
         let mut next = state.clone();
         next.settings
             .workspaces
@@ -239,6 +265,7 @@ impl Service {
         }
         self.persist(&next)?;
         *state = next;
+        self.scan_cache.remove_root(&root);
         Ok(state.settings.clone())
     }
     pub fn save_sessions(
@@ -325,6 +352,7 @@ impl Service {
         if root != Path::new(&selected.path) {
             return Err("Registered workspace folder has moved or become a symlink".into());
         }
+        let mut seen = HashSet::new();
         let mut entries = Vec::new();
         let walk = WalkDir::new(&root)
             .follow_links(false)
@@ -360,25 +388,22 @@ impl Service {
             } else {
                 continue;
             };
-            let content = if kind == "note" {
-                fs::read_to_string(path).unwrap_or_default()
+            let metadata = found
+                .metadata()
+                .map_err(|e| err("Cannot read file metadata", e))?;
+            let (title, tags) = if kind == "note" {
+                seen.insert(path.to_path_buf());
+                self.scan_cache.metadata(&root, path, &metadata)
             } else {
-                String::new()
+                (None, Vec::new())
             };
-            let title = if kind == "note" {
-                first_h1(&content)
-            } else {
-                None
-            }
-            .unwrap_or_else(|| {
+            let title = title.unwrap_or_else(|| {
                 path.file_stem()
                     .unwrap_or_default()
                     .to_string_lossy()
                     .to_string()
             });
-            let modified = found
-                .metadata()
-                .map_err(|e| err("Cannot read file metadata", e))?
+            let modified = metadata
                 .modified()
                 .ok()
                 .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
@@ -387,14 +412,11 @@ impl Service {
                 path: path_str.replace('\\', "/"),
                 kind: kind.into(),
                 title,
-                tags: if kind == "note" {
-                    tags(&content)
-                } else {
-                    Vec::new()
-                },
+                tags,
                 modified,
             });
         }
+        self.scan_cache.finish(&root, &seen);
         entries.sort_by(|a, b| a.path.cmp(&b.path));
         Ok(Snapshot {
             workspace: selected.clone(),
@@ -485,7 +507,7 @@ impl Service {
         if revision(&current) != expected {
             return Err("Note changed externally. Reload or copy your edits before saving.".into());
         }
-        atomic_write(&source, content.as_bytes())?;
+        self.write_note_file(&source, content.as_bytes())?;
         let auto = state
             .auto_names
             .get(&key(id, path))
@@ -508,7 +530,7 @@ impl Service {
         }
         let mut rewritten = Vec::new();
         if target != source {
-            match move_without_overwrite(&source, &target) {
+            match self.move_file(&source, &target) {
                 Ok(()) => {
                     let new_path = normalized_relative(root, &target)?;
                     state.auto_names.remove(&key(id, path));
@@ -577,7 +599,7 @@ impl Service {
             return Err("A note already exists at that path".into());
         }
         let (rewritten, mut warnings) = if target != source {
-            move_without_overwrite(&source, &target)?;
+            self.move_file(&source, &target)?;
             self.rewrite_incoming(&state, &source, &target, id)
         } else {
             (Vec::new(), Vec::new())
@@ -655,7 +677,7 @@ impl Service {
                 warnings: Vec::new(),
             });
         }
-        move_without_overwrite(&source, &target)?;
+        self.move_file(&source, &target)?;
         let new_path = normalized_relative(root, &target)?;
         move_appearance(&mut state.settings, id, path, &new_path);
         move_session_path(&mut state.settings, id, path, &new_path);
@@ -695,7 +717,9 @@ impl Service {
         } else if !is_image(&target) {
             return Err("Only Markdown notes and supported images can be deleted".into());
         }
-        self.trash.delete(&target)?;
+        let deletion = self.trash.delete(&target);
+        self.scan_cache.invalidate(&target);
+        deletion?;
         state.auto_names.remove(&key(id, path));
         if let Some(appearances) = state.settings.appearances.get_mut(id) {
             appearances.remove(path);
@@ -893,7 +917,7 @@ impl Service {
             if changed == content {
                 continue;
             }
-            if let Err(e) = atomic_write(&note_path, changed.as_bytes()) {
+            if let Err(e) = self.write_note_file(&note_path, changed.as_bytes()) {
                 warnings.push(format!("Cannot update links in {path}: {e}"));
                 continue;
             }

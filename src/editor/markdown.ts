@@ -79,19 +79,26 @@ export function markdownBlocks(body: string): MarkdownBlock[] {
   const offsets = [0];
   for (const line of lines)
     offsets.push((offsets.at(-1) ?? 0) + line.length + 1);
-  const starts = new Set<number>([0]);
+  const starts = new Map<number, number>([[0, 0]]);
   const environment = {};
-  for (const token of parser.parse(body, environment)) {
+  const tokens = parser.parse(body, environment);
+  for (const [index, token] of tokens.entries()) {
     if (token.level === 0 && token.nesting !== -1 && token.map)
-      starts.add(offsets[token.map[0]] ?? 0);
+      starts.set(offsets[token.map[0]] ?? 0, index);
   }
-  const sorted = [...starts]
-    .filter((start) => start < body.length)
-    .sort((a, b) => a - b);
+  const sorted = [...starts.entries()]
+    .filter(([start]) => start < body.length)
+    .sort(([a], [b]) => a - b);
   if (!sorted.length) return [{ from: 0, to: 0, source: "", html: "" }];
-  return sorted.map((from, i) => {
-    const to = sorted[i + 1] ?? body.length;
+  return sorted.map(([from, tokenFrom], i) => {
+    const next = sorted[i + 1];
+    const to = next?.[0] ?? body.length;
     const source = body.slice(from, to);
-    return { from, to, source, html: parser.render(source, environment) };
+    const html = parser.renderer.render(
+      tokens.slice(tokenFrom, next?.[1] ?? tokens.length),
+      parser.options,
+      environment,
+    );
+    return { from, to, source, html };
   });
 }

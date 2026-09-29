@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import {
   BookOpen,
   FileText,
@@ -11,11 +11,42 @@ import {
   X,
 } from "lucide-react";
 import { Sidebar } from "./components/Sidebar";
-import { SearchDialog } from "./components/SearchDialog";
-import { TextDialog, WorkspaceDialog } from "./components/Forms";
-import { AppearanceDialog, ConfirmDialog } from "./components/FileDialogs";
+const SearchDialog = lazy(() =>
+  import("./components/SearchDialog").then((module) => ({
+    default: module.SearchDialog,
+  })),
+);
+const TextDialog = lazy(() =>
+  import("./components/Forms").then((module) => ({
+    default: module.TextDialog,
+  })),
+);
+const WorkspaceDialog = lazy(() =>
+  import("./components/Forms").then((module) => ({
+    default: module.WorkspaceDialog,
+  })),
+);
+const AppearanceDialog = lazy(() =>
+  import("./components/FileDialogs").then((module) => ({
+    default: module.AppearanceDialog,
+  })),
+);
+const ConfirmDialog = lazy(() =>
+  import("./components/FileDialogs").then((module) => ({
+    default: module.ConfirmDialog,
+  })),
+);
+const SettingsDialog = lazy(() =>
+  import("./components/SettingsDialog").then((module) => ({
+    default: module.SettingsDialog,
+  })),
+);
 import { ItemIcon } from "./components/ItemIcon";
-import { NotePane } from "./components/NotePane";
+const NotePane = lazy(() =>
+  import("./components/NotePane").then((module) => ({
+    default: module.NotePane,
+  })),
+);
 import { SaveStatus } from "./components/SaveStatus";
 import { ImagePane } from "./components/ImagePane";
 import type { NoteDocument } from "./domain/document";
@@ -50,6 +81,7 @@ type Modal =
   | { kind: "search"; query: string }
   | { kind: "folder" }
   | { kind: "workspace" }
+  | { kind: "settings" }
   | { kind: "rename"; document: NoteDocument }
   | { kind: "rename-image"; id: string; path: string }
   | { kind: "appearance"; id: string; path: string; document?: NoteDocument }
@@ -79,6 +111,10 @@ export default function App() {
       : session.primary;
   const appearances = state.appearances[workspace?.id ?? ""] ?? {};
   const closeModal = () => setModal(null);
+  const openRename = useCallback(
+    (document: NoteDocument) => setModal({ kind: "rename", document }),
+    [],
+  );
 
   const openFolder = useCallback(async () => {
     const path = await chooseWorkspaceFolder();
@@ -118,6 +154,10 @@ export default function App() {
       const id = current.activeWorkspaceId;
       const value = currentSession();
       const key = event.key.toLowerCase();
+      if (key === ",") {
+        event.preventDefault();
+        setModal({ kind: "settings" });
+      }
       if (key === "p") {
         event.preventDefault();
         setModal({ kind: "search", query: "" });
@@ -170,7 +210,8 @@ export default function App() {
     };
     const focus = () => {
       const id = useApp.getState().activeWorkspaceId;
-      if (id) run(refreshWorkspace(id));
+      if (id && useApp.getState().preferences.refreshOnFocus)
+        run(refreshWorkspace(id));
     };
     window.addEventListener("beforeunload", beforeUnload);
     window.addEventListener("focus", focus);
@@ -223,11 +264,15 @@ export default function App() {
           entry?.kind === "image" ? (
             <ImagePane workspaceId={workspace.id} path={path} />
           ) : (
-            <NotePane
-              workspaceId={workspace.id}
-              path={path}
-              onRename={(document) => setModal({ kind: "rename", document })}
-            />
+            <Suspense
+              fallback={<div className="pane-message">Opening editor…</div>}
+            >
+              <NotePane
+                workspaceId={workspace.id}
+                path={path}
+                onRename={openRename}
+              />
+            </Suspense>
           )
         ) : (
           <div className="pane-empty">
@@ -346,6 +391,7 @@ export default function App() {
           onWorkspace={switchWorkspace}
           onAddWorkspace={() => run(openFolder())}
           onSettings={() => setModal({ kind: "workspace" })}
+          onAppSettings={() => setModal({ kind: "settings" })}
           onSearch={(query = "") => setModal({ kind: "search", query })}
           onNewNote={() => {
             if (workspace) run(newNote(workspace.id, selectedFolder));
@@ -503,102 +549,110 @@ export default function App() {
         <span className="status-encoding">UTF-8</span>
         <span>Auto direction</span>
       </footer>
-      {modal?.kind === "search" && (
-        <SearchDialog onClose={closeModal} initial={modal.query} />
-      )}
-      {modal?.kind === "workspace" && workspace && (
-        <WorkspaceDialog
-          workspace={workspace}
-          onSubmit={updateWorkspace}
-          onRemove={() =>
-            setModal({
-              kind: "remove-workspace",
-              id: workspace.id,
-              name: workspace.name,
-              path: workspace.path,
-            })
-          }
-          onClose={closeModal}
-        />
-      )}
-      {modal?.kind === "folder" && workspace && (
-        <TextDialog
-          title="New folder"
-          label="Folder name"
-          hint={`Inside ${selectedFolder || workspace.name}`}
-          submitLabel="Create folder"
-          onClose={closeModal}
-          onSubmit={async (name) => {
-            await files.createFolder(workspace.id, selectedFolder, name);
-            await refreshWorkspace(workspace.id);
-          }}
-        />
-      )}
-      {modal?.kind === "appearance" && (
-        <AppearanceDialog
-          path={modal.path}
-          initial={
-            state.appearances[modal.id]?.[
-              modal.document?.getSnapshot().path ?? modal.path
-            ] ?? {
-              icon: null,
-              color: null,
+      <Suspense fallback={null}>
+        {modal?.kind === "settings" && <SettingsDialog onClose={closeModal} />}
+        {modal?.kind === "search" && (
+          <SearchDialog onClose={closeModal} initial={modal.query} />
+        )}
+        {modal?.kind === "workspace" && workspace && (
+          <WorkspaceDialog
+            workspace={workspace}
+            onSubmit={updateWorkspace}
+            onRemove={() =>
+              setModal({
+                kind: "remove-workspace",
+                id: workspace.id,
+                name: workspace.name,
+                path: workspace.path,
+              })
             }
-          }
-          onSubmit={(appearance) =>
-            setEntryAppearance(modal.id, modal.path, appearance, modal.document)
-          }
-          onClose={closeModal}
-        />
-      )}
-      {modal?.kind === "rename-image" && (
-        <TextDialog
-          title="Rename or move image"
-          label="Path inside this workspace"
-          initial={modal.path}
-          hint="Use an existing folder to move this image. Keep the image extension; existing image links will be updated where they can be resolved."
-          submitLabel="Rename image"
-          onClose={closeModal}
-          onSubmit={(name) => renameImage(modal.id, modal.path, name)}
-        />
-      )}
-      {modal?.kind === "delete" && (
-        <ConfirmDialog
-          title="Delete file?"
-          description={
-            files.kind === "demo"
-              ? "Remove this file from the demo?"
-              : "Move this file to Trash? You can restore it using your file manager."
-          }
-          detail={modal.path}
-          submitLabel="Delete file"
-          onClose={closeModal}
-          onConfirm={() =>
-            deleteEntry(modal.id, modal.path, modal.entryKind, modal.document)
-          }
-        />
-      )}
-      {modal?.kind === "remove-workspace" && (
-        <ConfirmDialog
-          title={`Remove ${modal.name}?`}
-          description="Remove this workspace from the app. Its folder and files will stay on disk, and you can open it again later."
-          detail={modal.path}
-          submitLabel="Remove workspace"
-          onClose={closeModal}
-          onConfirm={() => removeWorkspace(modal.id)}
-        />
-      )}
-      {modal?.kind === "rename" && (
-        <TextDialog
-          title="Rename or move note"
-          label="Path inside this workspace"
-          initial={modal.document.getSnapshot().path}
-          hint="The filename will no longer follow the note title. Existing links will be updated where they can be resolved."
-          submitLabel="Rename note"
-          onClose={closeModal}
-          onSubmit={(name) => renameNote(modal.document, name)}
-        />
-      )}
+            onClose={closeModal}
+          />
+        )}
+        {modal?.kind === "folder" && workspace && (
+          <TextDialog
+            title="New folder"
+            label="Folder name"
+            hint={`Inside ${selectedFolder || workspace.name}`}
+            submitLabel="Create folder"
+            onClose={closeModal}
+            onSubmit={async (name) => {
+              await files.createFolder(workspace.id, selectedFolder, name);
+              await refreshWorkspace(workspace.id);
+            }}
+          />
+        )}
+        {modal?.kind === "appearance" && (
+          <AppearanceDialog
+            path={modal.path}
+            initial={
+              state.appearances[modal.id]?.[
+                modal.document?.getSnapshot().path ?? modal.path
+              ] ?? {
+                icon: null,
+                color: null,
+              }
+            }
+            onSubmit={(appearance) =>
+              setEntryAppearance(
+                modal.id,
+                modal.path,
+                appearance,
+                modal.document,
+              )
+            }
+            onClose={closeModal}
+          />
+        )}
+        {modal?.kind === "rename-image" && (
+          <TextDialog
+            title="Rename or move image"
+            label="Path inside this workspace"
+            initial={modal.path}
+            hint="Use an existing folder to move this image. Keep the image extension; existing image links will be updated where they can be resolved."
+            submitLabel="Rename image"
+            onClose={closeModal}
+            onSubmit={(name) => renameImage(modal.id, modal.path, name)}
+          />
+        )}
+        {modal?.kind === "delete" && (
+          <ConfirmDialog
+            title="Delete file?"
+            description={
+              files.kind === "demo"
+                ? "Remove this file from the demo?"
+                : "Move this file to Trash? You can restore it using your file manager."
+            }
+            detail={modal.path}
+            submitLabel="Delete file"
+            onClose={closeModal}
+            onConfirm={() =>
+              deleteEntry(modal.id, modal.path, modal.entryKind, modal.document)
+            }
+          />
+        )}
+        {modal?.kind === "remove-workspace" && (
+          <ConfirmDialog
+            title={`Remove ${modal.name}?`}
+            description="Remove this workspace from the app. Its folder and files will stay on disk, and you can open it again later."
+            detail={modal.path}
+            submitLabel="Remove workspace"
+            onClose={closeModal}
+            onConfirm={() => removeWorkspace(modal.id)}
+          />
+        )}
+        {modal?.kind === "rename" && (
+          <TextDialog
+            title="Rename or move note"
+            label="Path inside this workspace"
+            initial={modal.document.getSnapshot().path}
+            hint="The filename will no longer follow the note title. Existing links will be updated where they can be resolved."
+            submitLabel="Rename note"
+            onClose={closeModal}
+            onSubmit={(name) => renameNote(modal.document, name)}
+          />
+        )}
+      </Suspense>
     </div>
   );
 }

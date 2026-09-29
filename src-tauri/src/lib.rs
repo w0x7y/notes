@@ -1,11 +1,12 @@
 pub mod markdown;
 pub mod model;
 pub mod pathing;
+mod scan_cache;
 pub mod service;
 
 use model::{
-    Appearance, DeleteResult, NoteFile, RenameImageResult, SaveResult, Session, Settings, Snapshot,
-    Workspace,
+    Appearance, DeleteResult, NoteFile, Preferences, RenameImageResult, SaveResult, Session,
+    Settings, Snapshot, Workspace,
 };
 use service::{ImageData, Service};
 use std::collections::HashMap;
@@ -25,6 +26,13 @@ async fn work<T: Send + 'static>(
 #[tauri::command]
 async fn load_settings(service: tauri::State<'_, Arc<Service>>) -> Result<Settings, String> {
     work(service, |s| s.load_settings()).await
+}
+#[tauri::command]
+async fn save_preferences(
+    service: tauri::State<'_, Arc<Service>>,
+    preferences: Preferences,
+) -> Result<Preferences, String> {
+    work(service, move |s| s.save_preferences(preferences)).await
 }
 #[tauri::command]
 async fn save_sessions(
@@ -185,6 +193,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             load_settings,
+            save_preferences,
             save_sessions,
             add_workspace,
             update_workspace,

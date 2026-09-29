@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import type { NoteFile, SaveResult } from "./contracts";
 import { NoteDocument } from "./document";
 
@@ -109,4 +109,27 @@ it("queues edits behind a rename and saves them to the new path", async () => {
   ).toEqual([["Custom.md", "Typed while renaming", "renamed"]]);
   expect(doc.getSnapshot().status.kind).toBe("saved");
   doc.dispose();
+});
+
+it("reschedules a pending autosave when its delay changes", async () => {
+  vi.useFakeTimers();
+  const write = vi.fn(async (payload: NoteFile): Promise<SaveResult> => ({
+    ...payload,
+    revision: "1",
+    rewritten: [],
+    warnings: [],
+  }));
+  const doc = new NoteDocument("work", note, write, () => {});
+  try {
+    doc.edit("Keep these edits");
+    doc.setAutosaveDelay(2000);
+    await vi.advanceTimersByTimeAsync(600);
+    expect(write).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1400);
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(doc.dirty).toBe(false);
+  } finally {
+    doc.dispose();
+    vi.useRealTimers();
+  }
 });

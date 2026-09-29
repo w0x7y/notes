@@ -35,3 +35,31 @@ it("uses automatic direction on Hebrew headings, tight lists and table cells", (
   for (const tag of ["h2", "li", "th", "td"])
     expect(html).toContain(`<${tag} dir="auto">`);
 });
+
+it.each([
+  "\n\n# Heading\n\nA **bold** paragraph.\n\n---\n",
+  "# כותרת\r\n\r\nMixed עברית text.\r\n\r\n- first\r\n- second\r\n",
+  "- [x] done\n- [ ] pending\n  - nested\n\n> Quote\n>\n> Second paragraph\n",
+  "```ts\nconst answer = 42;\n```\n\n    indented code\n\nLast paragraph.\n",
+  "| שם | Value |\n| --- | --- |\n| עברית | English |\n\n[[Note|Alias]] ![[photo.png]]\n\n$x^2$\n\n$$\nx = y\n$$\n",
+  "[site]: https://example.com\n\n[Site][site]\n\n[missing][nope]\n",
+  "[definition]: https://example.com\n",
+  "\n  \n",
+  "",
+])("keeps whole-document rendering and editable ranges for %j", (body) => {
+  const blocks = markdownBlocks(body);
+  expect(blocks.map((block) => block.source).join("")).toBe(body);
+  expect(blocks.map((block) => block.html).join("")).toBe(renderMarkdown(body));
+  let position = 0;
+  for (const block of blocks) {
+    expect(block.from).toBe(position);
+    expect(body.slice(block.from, block.to)).toBe(block.source);
+    position = block.to;
+  }
+  expect(position).toBe(body.length);
+});
+
+it("does not carry reference definitions into another note", () => {
+  markdownBlocks("[Site][site]\n\n[site]: https://example.com\n");
+  expect(markdownBlocks("[Site][site]")[0]?.html).not.toContain("<a ");
+});

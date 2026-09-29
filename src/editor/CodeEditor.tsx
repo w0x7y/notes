@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
-import { EditorState, type Extension } from "@codemirror/state";
+import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import {
   Decoration,
   EditorView,
@@ -18,6 +18,12 @@ import { bracketMatching, syntaxTree } from "@codemirror/language";
 import { markdown } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
 import { oneDark } from "@codemirror/theme-one-dark";
+import { useShallow } from "zustand/react/shallow";
+import { useApp } from "../domain/app-store";
+import {
+  editorPreferenceExtensions,
+  selectEditorPreferences,
+} from "./preferences";
 
 export type Format =
   | "bold"
@@ -146,6 +152,9 @@ type Props = {
 
 export const CodeEditor = forwardRef<EditorHandle, Props>(
   function CodeEditor(props, ref) {
+    const preferences = useApp(useShallow(selectEditorPreferences));
+    const settings = useRef(new Compartment());
+    const initialPreferences = useRef(preferences);
     const host = useRef<HTMLDivElement>(null);
     const editor = useRef<EditorView | null>(null);
     const handlers = useRef(props);
@@ -169,27 +178,25 @@ export const CodeEditor = forwardRef<EditorHandle, Props>(
         bracketMatching(),
         markdown({ codeLanguages: languages }),
         oneDark,
-        EditorView.lineWrapping,
+        settings.current.of(
+          editorPreferenceExtensions(initialPreferences.current),
+        ),
         EditorView.perLineTextDirection.of(true),
         direction,
         EditorView.contentAttributes.of({
           "aria-label": initial.label ?? "Markdown editor",
-          spellcheck: "false",
         }),
         EditorView.theme({
-          "&": { backgroundColor: "transparent", fontSize: "15px" },
+          "&": { backgroundColor: "transparent" },
           ".cm-content": {
-            fontFamily: "var(--font-mono)",
             padding: "0",
             caretColor: "#61afef",
           },
-          ".cm-line": { padding: "0", lineHeight: "1.9" },
+          ".cm-line": { padding: "0" },
           ".cm-scroller": {
             overflow: "visible",
-            fontFamily: "var(--font-mono)",
           },
           "&.cm-focused": { outline: "none" },
-          ".cm-gutters": { display: "none" },
         }),
         keymap.of([
           {
@@ -269,6 +276,14 @@ export const CodeEditor = forwardRef<EditorHandle, Props>(
         editor.current = null;
       };
     }, []);
+
+    useEffect(() => {
+      editor.current?.dispatch({
+        effects: settings.current.reconfigure(
+          editorPreferenceExtensions(preferences),
+        ),
+      });
+    }, [preferences]);
 
     useEffect(() => {
       const view = editor.current;

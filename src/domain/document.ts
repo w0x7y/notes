@@ -33,7 +33,7 @@ export class NoteDocument {
       previousPath: string,
       result: SaveResult,
     ) => void,
-    private readonly delay = 600,
+    private delay = 600,
   ) {
     this.id = `${workspaceId}:${note.path}:${Date.now()}`;
     this.content = this.savedContent = note.content;
@@ -67,6 +67,16 @@ export class NoteDocument {
       revision: this.revision,
       autoRename: this.snapshot.autoRename,
     };
+  }
+
+  setAutosaveDelay(delay: number): void {
+    this.delay = delay;
+    if (this.timer && this.dirty) {
+      clearTimeout(this.timer);
+      this.timer = setTimeout(() => {
+        void this.flush().catch(() => {});
+      }, delay);
+    }
   }
 
   edit(content: string): void {

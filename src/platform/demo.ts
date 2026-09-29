@@ -1,3 +1,4 @@
+import { defaultPreferences, preferencesSchema } from "../domain/preferences";
 import type {
   FileService,
   NoteFile,
@@ -34,6 +35,7 @@ const sample =
 export function createDemoFiles(): FileService {
   let revision = 1;
   let settings: Settings = {
+    preferences: { ...defaultPreferences },
     workspaces: [algebra, web],
     activeWorkspaceId: "algebra",
     toolbarVisible: false,
@@ -144,6 +146,11 @@ export function createDemoFiles(): FileService {
   });
   return {
     kind: "demo",
+    savePreferences: async (preferences) => {
+      const validated = preferencesSchema.parse(preferences);
+      settings.preferences = { ...validated };
+      return validated;
+    },
     removeWorkspace: async (id) => {
       workspace(id);
       settings.workspaces = settings.workspaces.filter(

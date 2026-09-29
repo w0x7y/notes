@@ -50,3 +50,36 @@ it("combines title terms and Hebrew tag filters", () => {
 it("does not match folder names as note titles", () => {
   expect(searchNotes(entries, "other", "current")).toEqual([]);
 });
+
+it("supports workspace scope and disabling workspace priority", () => {
+  expect(
+    searchNotes(entries, "vec", "current", { scope: "current" }).map(
+      (e) => e.path,
+    ),
+  ).toEqual(["Vector spaces.md"]);
+  expect(
+    searchNotes(entries, "vec", "current", {
+      currentWorkspaceFirst: false,
+    }).map((e) => e.path),
+  ).toEqual(["Vector.md", "Vector spaces.md"]);
+});
+
+it("limited ranking returns the same ordered prefix as a complete search", () => {
+  const many = Array.from({ length: 1000 }, (_, i) => ({
+    ...entries[i % entries.length]!,
+    title: `${entries[i % entries.length]?.title} ${i}`,
+    path: `${i}.md`,
+    modified: (i * 37) % 79,
+  }));
+  for (const query of ["", "vec", "#math", "vct #לחזרה"]) {
+    for (const currentWorkspaceFirst of [true, false]) {
+      const all = searchNotes(many, query, "current", {
+        currentWorkspaceFirst,
+      });
+      for (const limit of [1, 20, 60, 200])
+        expect(
+          searchNotes(many, query, "current", { limit, currentWorkspaceFirst }),
+        ).toEqual(all.slice(0, limit));
+    }
+  }
+});

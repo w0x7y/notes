@@ -1,3 +1,8 @@
+import {
+  defaultPreferences,
+  preferencesSchema,
+  type Preferences,
+} from "./preferences";
 import { create } from "zustand";
 import type {
   Appearance,
@@ -26,6 +31,7 @@ type AppState = Settings & {
 };
 
 export const useApp = create<AppState>(() => ({
+  preferences: { ...defaultPreferences },
   workspaces: [],
   activeWorkspaceId: null,
   sessions: {},
@@ -66,25 +72,42 @@ function persistSoon(): void {
 export async function initialize(): Promise<void> {
   try {
     const settings = await files.loadSettings();
-    useApp.setState(settings);
-    const results = await Promise.allSettled(
-      settings.workspaces.map((workspace) => files.scanWorkspace(workspace.id)),
-    );
-    const entries: Record<string, Entry[]> = {};
-    results.forEach((result, i) => {
-      if (result.status === "fulfilled")
-        entries[result.value.workspace.id] = result.value.entries;
-      else
-        showError(
-          `Could not open ${settings.workspaces[i]?.name}: ${errorMessage(result.reason)}`,
-        );
-    });
     const activeWorkspaceId = settings.workspaces.some(
       (item) => item.id === settings.activeWorkspaceId,
     )
       ? settings.activeWorkspaceId
       : (settings.workspaces[0]?.id ?? null);
-    useApp.setState({ entries, activeWorkspaceId, ready: true });
+    useApp.setState({
+      ...settings,
+      activeWorkspaceId,
+      sessions: settings.preferences.restoreSession ? settings.sessions : {},
+    });
+    // Read the active workspace first, before background work can occupy disk workers.
+    const scan = async (workspace: Workspace) => {
+      try {
+        const snapshot = await files.scanWorkspace(workspace.id);
+        if (
+          !useApp.getState().workspaces.some((item) => item.id === workspace.id)
+        )
+          return;
+        useApp.setState((state) => ({
+          entries: { ...state.entries, [workspace.id]: snapshot.entries },
+        }));
+      } catch (error) {
+        showError(`Could not open ${workspace.name}: ${errorMessage(error)}`);
+      }
+    };
+    const active = settings.workspaces.find(
+      (workspace) => workspace.id === activeWorkspaceId,
+    );
+    if (active) await scan(active);
+    useApp.setState({ ready: true });
+    await Promise.allSettled(
+      settings.workspaces
+        .filter((workspace) => workspace.id !== activeWorkspaceId)
+        .map(scan),
+    );
+    useApp.setState({ ready: true });
   } catch (error) {
     showError(error);
     useApp.setState({ ready: true });
@@ -149,10 +172,16 @@ export function openFile(
 }
 
 export async function closeFile(id: string, path: string): Promise<void> {
-  const document = documents.get(key(id, path));
+  const document =
+    documents.get(key(id, path)) ?? (await loading.get(key(id, path)));
   await document?.flush();
   const currentPath = document?.getSnapshot().path ?? path;
   removeTab(id, currentPath);
+  // Closed, saved buffers do not need to retain their text and subscriptions.
+  if (document && !document.dirty && !document.hasPendingOperation) {
+    document.dispose();
+    documents.delete(key(id, currentPath));
+  }
 }
 
 function removeTab(id: string, currentPath: string): void {
@@ -349,6 +378,7 @@ function registerDocument(
     note,
     (payload) => files.saveNote(id, payload),
     saved,
+    useApp.getState().preferences.autosaveDelayMs,
   );
   documents.set(key(id, note.path), document);
   return document;
@@ -407,13 +437,40 @@ export async function saveCopy(document: NoteDocument): Promise<void> {
   openFile(document.workspaceId, copy.getSnapshot().path);
 }
 
-export async function refreshWorkspace(id: string): Promise<void> {
+const refreshing = new Map<string, Promise<void>>();
+export function refreshWorkspace(id: string): Promise<void> {
+  const pending = refreshing.get(id);
+  if (pending) return pending;
+  const request = refresh(id).finally(() => refreshing.delete(id));
+  refreshing.set(id, request);
+  return request;
+}
+function sameEntries(a: Entry[], b: Entry[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every((entry, index) => {
+      const other = b[index];
+      return (
+        other &&
+        entry.path === other.path &&
+        entry.kind === other.kind &&
+        entry.title === other.title &&
+        entry.modified === other.modified &&
+        entry.tags.length === other.tags.length &&
+        entry.tags.every((tag, i) => tag === other.tags[i])
+      );
+    })
+  );
+}
+async function refresh(id: string): Promise<void> {
   const snapshot = await files.scanWorkspace(id);
   if (!useApp.getState().workspaces.some((workspace) => workspace.id === id))
     return;
-  useApp.setState((state) => ({
-    entries: { ...state.entries, [id]: snapshot.entries },
-  }));
+  if (!sameEntries(useApp.getState().entries[id] ?? [], snapshot.entries)) {
+    useApp.setState((state) => ({
+      entries: { ...state.entries, [id]: snapshot.entries },
+    }));
+  }
   const openDocuments = [...documents.values()].filter(
     (document) => document.workspaceId === id && !document.dirty,
   );
@@ -461,4 +518,13 @@ export function hasUnsavedChanges(): boolean {
 export function toggleToolbar(): void {
   useApp.setState((state) => ({ toolbarVisible: !state.toolbarVisible }));
   persistSoon();
+}
+
+export async function savePreferences(preferences: Preferences): Promise<void> {
+  const updated = await files.savePreferences(
+    preferencesSchema.parse(preferences),
+  );
+  useApp.setState({ preferences: updated });
+  for (const document of documents.values())
+    document.setAutosaveDelay(updated.autosaveDelayMs);
 }

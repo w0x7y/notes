@@ -1,6 +1,7 @@
 import {
   Suspense,
   lazy,
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -73,7 +74,14 @@ function NoteView({
     document.getSnapshot,
   );
   const toolbar = useApp((state) => state.toolbarVisible);
-  const [preview, setPreview] = useState(false);
+  const readableWidth = useApp((state) => state.preferences.readableWidth);
+  const [preview, setPreview] = useState(
+    () => useApp.getState().preferences.defaultPreview,
+  );
+  const onLink = useCallback(
+    (target: string) => followLink(document, target),
+    [document],
+  );
   const editor = useRef<EditorHandle>(null);
   const titleInput = useRef<HTMLInputElement>(null);
   const scroll = useRef<HTMLDivElement>(null);
@@ -139,7 +147,10 @@ function NoteView({
           document.scrollTop = event.currentTarget.scrollTop;
         }}
       >
-        <article className="document">
+        <article
+          className="document"
+          style={{ maxWidth: readableWidth ? 940 : "none" }}
+        >
           <input
             ref={titleInput}
             className="note-title"
@@ -163,7 +174,7 @@ function NoteView({
                 document={document}
                 externalVersion={snapshot.externalVersion}
                 editorRef={editor}
-                onLink={(target) => followLink(document, target)}
+                onLink={onLink}
               />
             </Suspense>
           ) : (

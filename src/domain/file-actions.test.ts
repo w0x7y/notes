@@ -128,3 +128,47 @@ it("flushes pending note edits before renaming an image and applying rewritten l
   expect(doc.content).toContain("../New.svg");
   expect(doc.dirty).toBe(false);
 });
+
+it("releases a closed saved document and reloads its current disk contents on reopening", async () => {
+  const app = await import("./app-store");
+  const { files } = await import("../platform");
+  await app.initialize();
+  const original = await app.loadDocument("algebra", "Practice problems.md");
+  await app.closeFile("algebra", "Practice problems.md");
+  const note = await files.readNote("algebra", "Practice problems.md");
+  await files.saveNote("algebra", { ...note, content: "# Edited elsewhere" });
+  const reopened = await app.loadDocument("algebra", "Practice problems.md");
+  expect(reopened).not.toBe(original);
+  expect(reopened.content).toBe("# Edited elsewhere");
+});
+
+it("applies preferences only after successful persistence and can disable session restore", async () => {
+  const app = await import("./app-store");
+  const { files } = await import("../platform");
+  await app.initialize();
+  const current = app.useApp.getState().preferences;
+  vi.spyOn(files, "savePreferences").mockRejectedValueOnce(
+    new Error("Disk full"),
+  );
+  await expect(
+    app.savePreferences({ ...current, fontSize: 20 }),
+  ).rejects.toThrow("Disk full");
+  expect(app.useApp.getState().preferences.fontSize).toBe(current.fontSize);
+  await app.savePreferences({ ...current, restoreSession: false });
+  await app.initialize();
+  expect(app.useApp.getState().sessions).toEqual({});
+});
+
+it("coalesces concurrent refreshes and preserves the file index when nothing changed", async () => {
+  const app = await import("./app-store");
+  const { files } = await import("../platform");
+  await app.initialize();
+  const entries = app.useApp.getState().entries.algebra;
+  const scan = vi.spyOn(files, "scanWorkspace");
+  await Promise.all([
+    app.refreshWorkspace("algebra"),
+    app.refreshWorkspace("algebra"),
+  ]);
+  expect(scan).toHaveBeenCalledTimes(1);
+  expect(app.useApp.getState().entries.algebra).toBe(entries);
+});
