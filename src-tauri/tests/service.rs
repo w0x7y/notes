@@ -1606,3 +1606,42 @@ fn drawing_blocks_round_trip_as_notes_without_polluting_search_metadata() {
     assert_eq!(entry.title, "Diagram");
     assert_eq!(entry.tags, ["school"]);
 }
+
+#[test]
+fn workspace_scan_skips_dependency_trees_but_keeps_real_note_folders() {
+    let (_config, service) = service();
+    let root = tempdir().unwrap();
+    for folder in [
+        "project/node_modules/package",
+        "__pycache__",
+        "Lectures",
+        "target",
+        "dist",
+    ] {
+        fs::create_dir_all(root.path().join(folder)).unwrap();
+        fs::write(root.path().join(folder).join("Readme.md"), "# Note").unwrap();
+    }
+    let scan = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap();
+    assert!(!scan
+        .entries
+        .iter()
+        .any(|entry| entry.path.contains("node_modules") || entry.path.contains("__pycache__")));
+    for path in ["Lectures/Readme.md", "target/Readme.md", "dist/Readme.md"] {
+        assert!(scan.entries.iter().any(|entry| entry.path == path));
+    }
+    // Explicitly opening such a directory still means the user chose it as the root.
+    let explicit = service
+        .add_workspace(
+            root.path()
+                .join("project/node_modules/package")
+                .to_str()
+                .unwrap(),
+        )
+        .unwrap();
+    assert!(explicit
+        .entries
+        .iter()
+        .any(|entry| entry.path == "Readme.md"));
+}

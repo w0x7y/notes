@@ -16,6 +16,19 @@ use std::time::UNIX_EPOCH;
 use tempfile::NamedTempFile;
 use walkdir::WalkDir;
 
+// Apply the same boundary to indexing and incoming-link rewrites. Explicitly
+// chosen workspace roots remain readable, even when their name is excluded.
+fn workspace_entry(entry: &walkdir::DirEntry) -> bool {
+    if entry.file_type().is_symlink() {
+        return false;
+    }
+    if entry.depth() == 0 || !entry.file_type().is_dir() {
+        return true;
+    }
+    let name = entry.file_name().to_string_lossy();
+    !name.starts_with('.') && !matches!(name.as_ref(), "node_modules" | "__pycache__")
+}
+
 pub struct Service {
     config_file: PathBuf,
     state: Mutex<Stored>,
@@ -411,12 +424,7 @@ impl Service {
         let walk = WalkDir::new(&root)
             .follow_links(false)
             .into_iter()
-            .filter_entry(|entry| {
-                entry.depth() == 0
-                    || (!entry.file_type().is_symlink()
-                        && (!entry.file_type().is_dir()
-                            || !entry.file_name().to_string_lossy().starts_with('.')))
-            });
+            .filter_entry(workspace_entry);
         for found in walk {
             let found = found.map_err(|e| err("Cannot scan workspace", e))?;
             if found.depth() == 0 {
@@ -867,12 +875,7 @@ impl Service {
             for found in WalkDir::new(&selected.path)
                 .follow_links(false)
                 .into_iter()
-                .filter_entry(|e| {
-                    !e.file_type().is_symlink()
-                        && (e.depth() == 0
-                            || !e.file_type().is_dir()
-                            || !e.file_name().to_string_lossy().starts_with('.'))
-                })
+                .filter_entry(workspace_entry)
             {
                 match found {
                     Ok(entry) if entry.file_type().is_file() => {

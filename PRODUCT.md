@@ -20,7 +20,7 @@ A student and developer replacing their Obsidian workflow with a focused, keyboa
 
 - Existing folders open as workspaces, identified by a color and icon in a sidebar dropdown.
 - Regular Markdown files remain on disk; optional folders and inline English or Hebrew tags organize notes.
-- Global fuzzy search matches titles and tags, with current-workspace results first. No full-text search in v1.
+- Global fuzzy search matches titles and tags, with current-workspace results first. A separate full-text search provides matching snippets, workspace/folder/tag filters, and saved searches.
 - Folders start collapsed when opening or switching workspaces.
 - App settings support editor appearance/behavior, autosave timing, title/tag search scope and order, and workspace/session behavior. They persist separately from notes and open with Ctrl+comma.
 - Each workspace remembers its own tabs and split-pane layout. Middle-click closes a tab after saving.
@@ -45,4 +45,4 @@ The working interface omits the extra top title bar and per-pane save strip. The
 
 ## Current scope
 
-First working desktop build, including workspace folders, Markdown editing and preview, autosave, title/tag search, tabs, split panes, and existing images. See `README.md` for commands, verification, and current limits. App name remains undecided; “Notes” is the working name.
+First working desktop build, including workspace folders, Markdown editing and preview, autosave, title/tag and full-text search, tabs, split panes, and existing images. Additional workflows include backlinks, templates, daily notes, quick capture, tasks, project properties, and portable drawings. See `README.md` for commands, verification, and current limits. App name remains undecided; “Notes” is the working name.

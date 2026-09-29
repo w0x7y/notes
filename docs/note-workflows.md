@@ -30,7 +30,7 @@ Tools → Projects and assignments shows a filtered table or board. Both views e
 
 Content analysis is loaded on demand. A shared in-memory cache reuses unchanged notes across content search, backlinks, tasks and projects. Reads run in batches of four, yielding to input/paint after an eight-millisecond batch budget. Queries never read files. Save and rename events invalidate affected entries; open unsaved buffers take precedence over disk reads. First use must read and parse note contents. There is no persistent full-text index; content parsing runs on the main thread and unusually large notes can take longer to parse. The existing focus-refresh setting controls external file refresh.
 
-The [note graph](note-graph.md) loads on demand and uses a separate, bounded layout worker. The drawing editor and its SVG renderer still load only when used. Drawing Done/Ctrl+S writes immutable SVG assets with ordinary Markdown image links. See [drawings](drawings.md).
+The drawing editor and its SVG renderer load only when used. Drawing Done/Ctrl+S writes immutable SVG assets with ordinary Markdown image links. See [drawings](drawings.md).
 
 ## Verification
 

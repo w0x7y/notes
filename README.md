@@ -26,6 +26,7 @@ On NVIDIA/Wayland, startup applies `__NV_DISABLE_EXPLICIT_SYNC=1` unless explici
 
 ## Included
 
+- Workspace scans omit dependency/cache trees (`node_modules`, `__pycache__`) and hidden directories.
 - Open folders as workspaces; customize their names, colors, and icons. Sidebar folders start collapsed, including when switching back to a workspace.
 - App settings open from the sidebar or Ctrl+comma. Adjust editor font/size/spacing, wrapping, line numbers, tab size, spellcheck, reading width, default preview, autosave delay, search scope/order/limit, session restoration, focus refresh, and file ordering. Settings persist outside your notes; Reset to defaults is available before saving.
 - Workspace and icon menus use the app theme. Dialogs focus their first field on opening; menus support arrow keys and Escape without focus outlines.
@@ -36,7 +37,6 @@ On NVIDIA/Wayland, startup applies `__NV_DISABLE_EXPLICIT_SYNC=1` unless explici
 - Global fuzzy title/tag search, with the current workspace first. Combine terms, such as `vector #exam`.
 - Full-text search with matching snippets, workspace/folder/tag filters, and saved searches.
 - Note/heading autocomplete, backlinks, heading outline, pinned notes, and Markdown slash commands.
-- An on-demand [note graph](docs/note-graph.md) with workspace/global/local views, search, pan, zoom and linked-note navigation.
 - Command palette, quick capture and daily notes in a dedicated Quick Notes workspace.
 - Editable Markdown starter templates, workspace task overview, and YAML properties with table/board views. See [workflow details](docs/note-workflows.md).
 - Lightweight drawings with editable source and portable SVG previews. See [drawing controls and storage](docs/drawings.md).
@@ -95,5 +95,9 @@ Earlier baseline verification on 2026-09-29 (new workflow checks are documented 
 - Existing images are supported; clipboard/drop image insertion is intentionally absent. Image tabs accept the native service’s supported formats and size limit.
 - Conflicting unsaved text is kept in memory and can be saved as a copy; there is no recovery journal after a process or system crash. External programs can still race a save in the short interval between revision checking and atomic replacement.
 - The initial JavaScript entry is about 47% smaller after splitting the editor, dialogs, and icon catalog. Some optional chunks still trigger Vite’s size warning. Local search, tree, preview, and scan measurements are in [docs/performance.md](docs/performance.md); end-to-end native input latency is not yet measured.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
 
 Lucide and its Feather-derived icon license notices are included in `public/THIRD_PARTY_NOTICES.txt`, which is embedded in the desktop frontend build.
