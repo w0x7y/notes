@@ -1,7 +1,8 @@
 use percent_encoding::{percent_decode_str, utf8_percent_encode, AsciiSet, CONTROLS};
 use pulldown_cmark::{Event, LinkType, Parser, Tag};
 use regex::{Captures, Regex};
-use std::path::Path;
+use std::collections::HashSet;
+use std::path::{Component, Path, PathBuf};
 use std::sync::LazyLock;
 
 static TAG: LazyLock<Regex> =
@@ -157,24 +158,45 @@ pub fn first_h1(content: &str) -> Option<String> {
     None
 }
 
-fn path_eq(candidate: &Path, target: &Path) -> bool {
-    // After a folder move the old parent no longer exists. Qualified paths
-    // still identify the old file by its exact workspace-relative spelling.
+fn path_eq(candidate: &Path, target: &Path, original_source: &Path) -> bool {
     if candidate == target {
         return true;
     }
     let Some(parent) = candidate.parent() else {
         return false;
     };
-    parent
-        .canonicalize()
-        .ok()
-        .map(|p| p.join(candidate.file_name().unwrap_or_default()) == target)
-        .unwrap_or(false)
+    if let Ok(parent) = parent.canonicalize() {
+        return parent.join(candidate.file_name().unwrap_or_default()) == target;
+    }
+    // A relocation removes old parents. Only missing ancestors of the original
+    // source or target may resolve lexically; unrelated missing paths stay invalid.
+    let target_parent = target.parent().unwrap_or(target);
+    let source_parent = original_source.parent().unwrap_or(original_source);
+    let mut normalized = PathBuf::new();
+    for component in parent.components() {
+        match component {
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::CurDir => {}
+            _ => normalized.push(component.as_os_str()),
+        }
+        match std::fs::symlink_metadata(&normalized) {
+            Ok(metadata) if metadata.file_type().is_symlink() => return false,
+            Err(error)
+                if error.kind() == std::io::ErrorKind::NotFound
+                    && (target_parent.starts_with(&normalized)
+                        || source_parent.starts_with(&normalized)) => {}
+            Err(_) => return false,
+            _ => {}
+        }
+    }
+    normalized.join(candidate.file_name().unwrap_or_default()) == target
 }
 
 pub struct LinkRewrite<'a> {
     pub source: &'a Path,
+    pub final_source: &'a Path,
     pub source_root: &'a Path,
     pub old: &'a Path,
     pub new: &'a Path,
@@ -184,107 +206,173 @@ pub struct LinkRewrite<'a> {
     pub bare_destination: &'a str,
     pub qualified_destination: &'a str,
     pub image: bool,
+    pub original_images: &'a HashSet<PathBuf>,
 }
 
-pub fn rewrite_links(content: &str, rewrite: &LinkRewrite<'_>) -> String {
-    let LinkRewrite {
-        source,
-        source_root,
-        old,
-        new,
-        target_root,
-        target_workspace_id,
-        unique_basename,
-        bare_destination,
-        qualified_destination,
-        image,
-    } = rewrite;
+fn rewrite_wiki(caps: &Captures<'_>, rewrite: &LinkRewrite<'_>) -> Option<String> {
+    if (&caps[1] == "!") != rewrite.image {
+        return None;
+    }
+    let destination = &caps[2];
+    let bare_old = if rewrite.image {
+        rewrite.old.file_name()
+    } else {
+        rewrite.old.file_stem()
+    }
+    .unwrap_or_default()
+    .to_string_lossy();
+    let candidate = |path: &str| {
+        if rewrite.image {
+            path.to_string()
+        } else {
+            format!("{path}.md")
+        }
+    };
+    let (match_target, qualified) = if let Some(root_path) = destination.strip_prefix('/') {
+        (
+            path_eq(
+                &rewrite.source_root.join(candidate(root_path)),
+                rewrite.old,
+                rewrite.source,
+            ),
+            true,
+        )
+    } else if let Some((id, root_path)) = destination.split_once(':') {
+        (
+            id == rewrite.target_workspace_id
+                && path_eq(
+                    &rewrite
+                        .target_root
+                        .join(candidate(root_path.trim_start_matches('/'))),
+                    rewrite.old,
+                    rewrite.source,
+                ),
+            true,
+        )
+    } else if destination == bare_old.as_ref() {
+        if rewrite.image {
+            let relative = rewrite
+                .source
+                .parent()
+                .unwrap_or(rewrite.source_root)
+                .join(candidate(destination));
+            let root = rewrite.source_root.join(candidate(destination));
+            let matches = if path_eq(&relative, rewrite.old, rewrite.source) {
+                true
+            } else if rewrite.original_images.contains(&relative) || relative.exists() {
+                false
+            } else if path_eq(&root, rewrite.old, rewrite.source) {
+                true
+            } else if rewrite.original_images.contains(&root) || root.exists() {
+                false
+            } else {
+                rewrite.unique_basename
+            };
+            (matches, false)
+        } else {
+            (rewrite.unique_basename, false)
+        }
+    } else {
+        let relative = candidate(destination);
+        (
+            path_eq(
+                &rewrite
+                    .source
+                    .parent()
+                    .unwrap_or(rewrite.source_root)
+                    .join(&relative),
+                rewrite.old,
+                rewrite.source,
+            ) || path_eq(
+                &rewrite.source_root.join(&relative),
+                rewrite.old,
+                rewrite.source,
+            ),
+            destination.contains('/'),
+        )
+    };
+    if !match_target {
+        return None;
+    }
+    let replacement = if qualified {
+        rewrite.qualified_destination
+    } else {
+        rewrite.bare_destination
+    };
+    Some(format!(
+        "{}[[{}{}{}]]",
+        &caps[1],
+        replacement,
+        caps.get(3).map_or("", |m| m.as_str()),
+        caps.get(4).map_or("", |m| m.as_str())
+    ))
+}
+
+fn rewrite_markdown(caps: &Captures<'_>, rewrite: &LinkRewrite<'_>) -> Option<String> {
+    let destination = &caps[1];
+    let (path, fragment) = destination
+        .split_once('#')
+        .map_or((destination, ""), |(a, b)| (a, b));
+    let decoded = percent_decode_str(path).decode_utf8().ok()?;
+    let root_relative = decoded.starts_with('/');
+    let candidate = if root_relative {
+        rewrite.source_root.join(decoded.trim_start_matches('/'))
+    } else {
+        rewrite
+            .source
+            .parent()
+            .unwrap_or(rewrite.source_root)
+            .join(decoded.as_ref())
+    };
+    if !path_eq(&candidate, rewrite.old, rewrite.source) {
+        return None;
+    }
+    let relative = if root_relative {
+        format!(
+            "/{}",
+            rewrite
+                .new
+                .strip_prefix(rewrite.source_root)
+                .unwrap_or(rewrite.new)
+                .to_string_lossy()
+                .replace('\\', "/")
+        )
+    } else {
+        pathdiff::diff_paths(
+            rewrite.new,
+            rewrite.final_source.parent().unwrap_or(rewrite.source_root),
+        )
+        .unwrap_or_default()
+        .to_string_lossy()
+        .replace('\\', "/")
+    };
+    let fragment = if fragment.is_empty() {
+        String::new()
+    } else {
+        format!("#{fragment}")
+    };
+    let encoded = utf8_percent_encode(&relative, LINK_PATH);
+    Some(format!(
+        "]({encoded}{fragment}{})",
+        caps.get(2).map_or("", |m| m.as_str())
+    ))
+}
+
+pub fn rewrite_links(content: &str, rewrites: &[LinkRewrite<'_>]) -> String {
+    // Match each original destination once. Rewritten destinations must never
+    // become input to another target in the same relocation.
     let wiki = visible_segments(content, |text| {
         WIKI.replace_all(text, |caps: &Captures| {
-            let embed = &caps[1] == "!";
-            if embed != *image {
-                return caps[0].to_string();
-            }
-            let destination = &caps[2];
-            let bare_old = if *image {
-                old.file_name()
-            } else {
-                old.file_stem()
-            }
-            .unwrap_or_default()
-            .to_string_lossy();
-            let candidate = |path: &str| {
-                if *image {
-                    path.to_string()
-                } else {
-                    format!("{path}.md")
-                }
-            };
-            let (match_target, qualified) = if let Some(root_path) = destination.strip_prefix('/') {
-                (path_eq(&source_root.join(candidate(root_path)), old), true)
-            } else if let Some((id, root_path)) = destination.split_once(':') {
-                if id == *target_workspace_id {
-                    (
-                        path_eq(
-                            &target_root.join(candidate(root_path.trim_start_matches('/'))),
-                            old,
-                        ),
-                        true,
-                    )
-                } else {
-                    (false, true)
-                }
-            } else if destination == bare_old.as_ref() {
-                if *image {
-                    let relative = source
-                        .parent()
-                        .unwrap_or(source_root)
-                        .join(candidate(destination));
-                    let root = source_root.join(candidate(destination));
-                    let matches = if path_eq(&relative, old) {
-                        true
-                    } else if relative.exists() {
-                        false
-                    } else if path_eq(&root, old) {
-                        true
-                    } else if root.exists() {
-                        false
-                    } else {
-                        *unique_basename
-                    };
-                    (matches, false)
-                } else {
-                    (*unique_basename, false)
-                }
-            } else {
-                let relative = candidate(destination);
-                (
-                    path_eq(&source.parent().unwrap_or(source_root).join(&relative), old)
-                        || path_eq(&source_root.join(&relative), old),
-                    destination.contains('/'),
-                )
-            };
-            if !match_target {
-                return caps[0].to_string();
-            }
-            let replacement = if qualified {
-                qualified_destination.to_string()
-            } else {
-                bare_destination.to_string()
-            };
-            format!(
-                "{}[[{}{}{}]]",
-                &caps[1],
-                replacement,
-                caps.get(3).map_or("", |m| m.as_str()),
-                caps.get(4).map_or("", |m| m.as_str())
-            )
+            rewrites
+                .iter()
+                .find_map(|rewrite| rewrite_wiki(caps, rewrite))
+                .unwrap_or_else(|| caps[0].to_string())
         })
         .to_string()
     });
     let mut replacements = Vec::new();
     for (event, range) in Parser::new(&wiki).into_offset_iter() {
-        let is_image_link = match event {
+        let image = match event {
             Event::Start(Tag::Image {
                 link_type: LinkType::Inline,
                 ..
@@ -295,66 +383,23 @@ pub fn rewrite_links(content: &str, rewrite: &LinkRewrite<'_>) -> String {
             }) => false,
             _ => continue,
         };
-        if is_image_link != *image {
-            continue;
-        }
         let Some(caps) = LINK.captures_iter(&wiki[range.clone()]).last() else {
             continue;
         };
         let Some(matched) = caps.get(0) else {
             continue;
         };
-        let replacement = {
-            let destination = &caps[1];
-            let (path, fragment) = destination
-                .split_once('#')
-                .map_or((destination, ""), |(a, b)| (a, b));
-            let decoded = percent_decode_str(path).decode_utf8();
-            let Ok(decoded) = decoded else {
-                continue;
-            };
-            let root_relative = decoded.starts_with('/');
-            let candidate = if root_relative {
-                source_root.join(decoded.trim_start_matches('/'))
-            } else {
-                source
-                    .parent()
-                    .unwrap_or(source_root)
-                    .join(decoded.as_ref())
-            };
-            if !path_eq(&candidate, old) {
-                continue;
-            }
-            let relative = if root_relative {
-                format!(
-                    "/{}",
-                    new.strip_prefix(source_root)
-                        .unwrap_or(new)
-                        .to_string_lossy()
-                        .replace('\\', "/")
-                )
-            } else {
-                pathdiff::diff_paths(new, source.parent().unwrap_or(source_root))
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .replace('\\', "/")
-            };
-            let fragment = if fragment.is_empty() {
-                String::new()
-            } else {
-                format!("#{fragment}")
-            };
-            let encoded = utf8_percent_encode(&relative, LINK_PATH);
-            format!(
-                "]({encoded}{fragment}{})",
-                caps.get(2).map_or("", |m| m.as_str())
-            )
-        };
-        replacements.push((
-            range.start + matched.start(),
-            range.start + matched.end(),
-            replacement,
-        ));
+        if let Some(replacement) = rewrites
+            .iter()
+            .filter(|rewrite| rewrite.image == image)
+            .find_map(|rewrite| rewrite_markdown(&caps, rewrite))
+        {
+            replacements.push((
+                range.start + matched.start(),
+                range.start + matched.end(),
+                replacement,
+            ));
+        }
     }
     let mut result = wiki;
     replacements.sort_unstable_by_key(|(start, _, _)| *start);

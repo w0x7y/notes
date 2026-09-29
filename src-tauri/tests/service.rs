@@ -9,6 +9,115 @@ fn service() -> (tempfile::TempDir, Service) {
 }
 
 #[test]
+fn folder_move_returns_one_final_rewrite_for_all_referenced_targets() {
+    let (_config, service) = service();
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("Old")).unwrap();
+    fs::write(root.path().join("Old/a.md"), "# A").unwrap();
+    fs::write(root.path().join("Old/b.md"), "# B").unwrap();
+    fs::write(root.path().join("Old/picture.png"), b"pixels").unwrap();
+    fs::write(
+        root.path().join("Index.md"),
+        "[[Old/a]] [B](Old/b.md#part) ![P](Old/picture.png) `[[Old/b]]`",
+    )
+    .unwrap();
+    let id = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+
+    let result = service.move_folder(&id, "Old", "New").unwrap();
+
+    assert!(result.warnings.is_empty(), "{:?}", result.warnings);
+    assert_eq!(result.rewritten.len(), 1);
+    let rewritten = &result.rewritten[0];
+    assert_eq!(rewritten.workspace_id, id);
+    assert_eq!(rewritten.path, "Index.md");
+    assert_eq!(
+        rewritten.content,
+        "[[/New/a]] [B](New/b.md#part) ![P](New/picture.png) `[[Old/b]]`"
+    );
+    assert_eq!(
+        fs::read_to_string(root.path().join("Index.md")).unwrap(),
+        rewritten.content
+    );
+    assert_eq!(
+        service.read_note(&id, "Index.md").unwrap().revision,
+        rewritten.revision
+    );
+}
+
+#[test]
+fn folder_move_resolves_descendant_links_before_move_and_writes_final_relative_paths() {
+    let (_config, service) = service();
+    let root = tempdir().unwrap();
+    fs::create_dir_all(root.path().join("Old/Nested")).unwrap();
+    fs::create_dir(root.path().join("Target")).unwrap();
+    fs::write(root.path().join("Old/b.md"), "# B").unwrap();
+    fs::write(root.path().join("Old/picture.png"), b"pixels").unwrap();
+    fs::write(
+        root.path().join("Old/Nested/a.md"),
+        "[[../b]] [[/Old/b]] [B](/Old/b.md) [relative](../b.md) ![[../picture.png]] ![P](/Old/picture.png) ![relative](../picture.png)",
+    )
+    .unwrap();
+    let id = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+
+    let result = service.move_folder(&id, "Old", "Target/New").unwrap();
+
+    let note = service.read_note(&id, "Target/New/Nested/a.md").unwrap();
+    assert_eq!(
+        note.content,
+        "[[/Target/New/b]] [[/Target/New/b]] [B](/Target/New/b.md) [relative](../b.md) ![[/Target/New/picture.png]] ![P](/Target/New/picture.png) ![relative](../picture.png)"
+    );
+    assert_eq!(result.rewritten.len(), 1);
+    assert_eq!(result.rewritten[0].path, note.path);
+    assert_eq!(result.rewritten[0].content, note.content);
+    assert_eq!(result.rewritten[0].revision, note.revision);
+}
+
+#[test]
+fn folder_move_warns_once_for_unreadable_note_and_returns_other_final_rewrites() {
+    let (_config, service) = service();
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("Old")).unwrap();
+    fs::write(root.path().join("Old/a.md"), "# A").unwrap();
+    fs::write(root.path().join("Old/b.md"), "# B").unwrap();
+    fs::write(root.path().join("ref.md"), "[[Old/a]] [B](Old/b.md)").unwrap();
+    let id = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    fs::write(root.path().join("broken.md"), [0xff, 0xfe]).unwrap();
+
+    let result = service.move_folder(&id, "Old", "New").unwrap();
+
+    assert_eq!(result.path, "New");
+    assert_eq!(result.warnings.len(), 1);
+    assert!(result.warnings[0].contains("Cannot read links in broken.md:"));
+    assert_eq!(result.rewritten.len(), 1);
+    let success = &result.rewritten[0];
+    assert_eq!(success.workspace_id, id);
+    assert_eq!(success.path, "ref.md");
+    assert_eq!(success.content, "[[/New/a]] [B](New/b.md)");
+    let persisted = service.read_note(&id, "ref.md").unwrap();
+    assert_eq!(persisted.content, success.content);
+    assert_eq!(persisted.revision, success.revision);
+    assert_eq!(
+        fs::read(root.path().join("broken.md")).unwrap(),
+        [0xff, 0xfe]
+    );
+    assert!(root.path().join("New/a.md").exists());
+    assert!(root.path().join("New/b.md").exists());
+    assert!(!root.path().join("Old").exists());
+}
+
+#[test]
 fn moving_folder_remaps_nested_files_metadata_and_links() {
     let (_config, service) = service();
     let root = tempdir().unwrap();
@@ -341,6 +450,58 @@ fn rename_rewrites_resolvable_links_and_preserves_code() {
     assert_eq!(
         fs::read_to_string(root.path().join("ref.md")).unwrap(),
         "[[b]] [read](b.md) `[[a]]`\n```\n[[a]]\n```\n"
+    );
+}
+
+#[test]
+fn rename_does_not_resolve_links_through_unrelated_missing_directories() {
+    let (_config, service) = service();
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("a.md"), "# A").unwrap();
+    fs::write(root.path().join("ref.md"), "[[missing/../a]] [read](a.md)").unwrap();
+    let id = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    let note = service.read_note(&id, "a.md").unwrap();
+
+    service
+        .rename_note(&id, "a.md", "b.md", &note.revision)
+        .unwrap();
+
+    assert_eq!(
+        fs::read_to_string(root.path().join("ref.md")).unwrap(),
+        "[[missing/../a]] [read](b.md)"
+    );
+}
+
+#[test]
+fn overlapping_workspaces_do_not_make_one_target_basename_ambiguous() {
+    let (_config, service) = service();
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("Sub")).unwrap();
+    fs::write(root.path().join("Sub/a.md"), "# A").unwrap();
+    fs::write(root.path().join("ref.md"), "[[a]]").unwrap();
+    let id = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    service
+        .add_workspace(root.path().join("Sub").to_str().unwrap())
+        .unwrap();
+    let note = service.read_note(&id, "Sub/a.md").unwrap();
+
+    let result = service
+        .rename_note(&id, "Sub/a.md", "Sub/b.md", &note.revision)
+        .unwrap();
+
+    assert_eq!(result.rewritten.len(), 1);
+    assert_eq!(result.rewritten[0].content, "[[b]]");
+    assert_eq!(
+        fs::read_to_string(root.path().join("ref.md")).unwrap(),
+        "[[b]]"
     );
 }
 
@@ -1131,6 +1292,31 @@ fn bare_image_embed_rewrite_prefers_its_own_workspace() {
     );
     assert_eq!(
         fs::read_to_string(second.path().join("ref.md")).unwrap(),
+        "![[old.png]]"
+    );
+}
+
+#[test]
+fn image_rename_does_not_resolve_a_bare_embed_through_an_existing_directory() {
+    let (_config, service) = service();
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("assets")).unwrap();
+    fs::create_dir(root.path().join("old.png")).unwrap();
+    fs::write(root.path().join("assets/old.png"), b"pixels").unwrap();
+    fs::write(root.path().join("ref.md"), "![[old.png]]").unwrap();
+    let id = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+
+    let result = service
+        .rename_image(&id, "assets/old.png", "assets/new.png")
+        .unwrap();
+
+    assert!(result.rewritten.is_empty());
+    assert_eq!(
+        fs::read_to_string(root.path().join("ref.md")).unwrap(),
         "![[old.png]]"
     );
 }

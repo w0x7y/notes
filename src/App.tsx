@@ -144,7 +144,9 @@ export default function App() {
   };
   const [modal, setModal] = useState<Modal>(null);
   const [sidebar, setSidebar] = useState(true);
-  const [selectedFolder, setSelectedFolder] = useState("");
+  const selectedFolder = state.selectedFolder;
+  const setSelectedFolder = (path: string) =>
+    useApp.setState({ selectedFolder: path });
   const workspace = state.workspaces.find(
     (item) => item.id === state.activeWorkspaceId,
   );
@@ -517,17 +519,7 @@ export default function App() {
             if (!workspace) return;
             const entry = entries.find((item) => item.path === path);
             if (!entry) return;
-            run(
-              moveEntry(workspace.id, path, entry.kind, folder).then(() => {
-                if (entry.kind === "folder")
-                  setSelectedFolder((current) =>
-                    current === path || current.startsWith(path + "/")
-                      ? [folder, basename(path)].filter(Boolean).join("/") +
-                        current.slice(path.length)
-                      : current,
-                  );
-              }),
-            );
+            run(moveEntry(workspace.id, path, entry.kind, folder));
           }}
           onAppearance={(path) => {
             if (!workspace) return;
@@ -815,15 +807,7 @@ export default function App() {
             hint="Enter a new name or a path inside an existing folder."
             submitLabel="Rename folder"
             onClose={closeModal}
-            onSubmit={async (destination) => {
-              const oldPath = modal.path;
-              await moveFolder(modal.id, oldPath, destination);
-              setSelectedFolder((current) =>
-                current === oldPath || current.startsWith(oldPath + "/")
-                  ? destination + current.slice(oldPath.length)
-                  : current,
-              );
-            }}
+            onSubmit={(destination) => moveFolder(modal.id, modal.path, destination)}
           />
         )}
         {modal?.kind === "delete" && (

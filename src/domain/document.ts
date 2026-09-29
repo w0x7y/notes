@@ -21,8 +21,10 @@ export class NoteDocument {
   private revision: string;
   private snapshot: DocumentSnapshot;
   private listeners = new Set<() => void>();
+  private contentListeners = new Set<() => void>();
   private timer: ReturnType<typeof setTimeout> | undefined;
   private pending: Promise<void> | null = null;
+  private held: Promise<void> | null = null;
 
   constructor(
     readonly workspaceId: string,
@@ -52,6 +54,12 @@ export class NoteDocument {
     this.listeners.add(listener);
     return () => {
       this.listeners.delete(listener);
+    };
+  };
+  subscribeContent = (listener: () => void) => {
+    this.contentListeners.add(listener);
+    return () => {
+      this.contentListeners.delete(listener);
     };
   };
   get dirty(): boolean {
@@ -85,6 +93,7 @@ export class NoteDocument {
     const title = splitNote(content).title;
     if (this.snapshot.status.kind !== "saving" || title !== this.snapshot.title)
       this.publish({ title, status: { kind: "saving" } });
+    this.contentListeners.forEach((listener) => listener());
     clearTimeout(this.timer);
     this.timer = setTimeout(() => {
       void this.flush().catch(() => {});
@@ -100,8 +109,28 @@ export class NoteDocument {
 
   flush(): Promise<void> {
     clearTimeout(this.timer);
+    if (this.held) return this.held.then(() => this.flush());
     if (this.pending) return this.pending;
     return this.track(this.drain());
+  }
+
+  /** Drain existing writes, then reserve the path while a relocation runs. */
+  async holdSaves(): Promise<() => void> {
+    await this.flush();
+    let release = () => {};
+    this.held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return () => {
+      this.held = null;
+      release();
+      if (this.dirty) {
+        clearTimeout(this.timer);
+        this.timer = setTimeout(() => {
+          void this.flush().catch(() => {});
+        }, this.delay);
+      }
+    };
   }
 
   private async drain(): Promise<void> {
@@ -126,6 +155,7 @@ export class NoteDocument {
 
   rename(renameFile: (note: NoteFile) => Promise<SaveResult>): Promise<void> {
     clearTimeout(this.timer);
+    if (this.held) return this.held.then(() => this.rename(renameFile));
     const operation = (this.pending ?? Promise.resolve())
       .then(async () => {
         await this.drain();
@@ -137,7 +167,10 @@ export class NoteDocument {
         // Typing continues while the filesystem operation runs. Keep those edits
         // and drain them against the new path and revision before reporting saved.
         const unchanged = this.content === payload.content;
-        if (unchanged) this.content = result.content;
+        if (unchanged && this.content !== result.content) {
+          this.content = result.content;
+          this.contentListeners.forEach((listener) => listener());
+        }
         this.publish({
           path: result.path,
           autoRename: result.autoRename,
@@ -184,18 +217,12 @@ export class NoteDocument {
       title: splitNote(content).title,
       externalVersion: this.snapshot.externalVersion + 1,
     });
+    this.contentListeners.forEach((listener) => listener());
   }
 
-  relocate(note: NoteFile): void {
-    if (this.dirty || this.pending)
-      throw new Error("Save the note before moving its folder.");
-    this.content = this.savedContent = note.content;
-    this.revision = note.revision;
+  relocatePath(path: string): void {
     this.publish({
-      path: note.path,
-      title: splitNote(note.content).title,
-      autoRename: note.autoRename,
-      status: { kind: "saved" },
+      path,
       externalVersion: this.snapshot.externalVersion + 1,
     });
   }
@@ -203,6 +230,7 @@ export class NoteDocument {
   dispose(): void {
     clearTimeout(this.timer);
     this.listeners.clear();
+    this.contentListeners.clear();
   }
   private publish(update: Partial<DocumentSnapshot>): void {
     this.snapshot = { ...this.snapshot, ...update };

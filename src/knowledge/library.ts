@@ -80,19 +80,20 @@ export function removeSearch(id: string) {
     savedSearches: state.savedSearches.filter((s) => s.id !== id),
   });
 }
-export function remapFavorite(workspaceId: string, from: string, to: string) {
+export function remapFavorites(
+  workspaceId: string,
+  map: (path: string) => string,
+) {
   const state = useLibrary.getState();
   if (
     state.favorites.some(
-      (f) => f.workspaceId === workspaceId && f.path === from,
+      (f) => f.workspaceId === workspaceId && map(f.path) !== f.path,
     )
   )
     save({
       ...state,
       favorites: state.favorites.map((f) =>
-        f.workspaceId === workspaceId && f.path === from
-          ? { ...f, path: to }
-          : f,
+        f.workspaceId === workspaceId ? { ...f, path: map(f.path) } : f,
       ),
     });
 }

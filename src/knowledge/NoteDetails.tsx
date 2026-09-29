@@ -3,8 +3,7 @@ import { X } from "lucide-react";
 import type { NoteDocument } from "../domain/document";
 import { navigateTo, useApp } from "../domain/app-store";
 import { resolveNoteLink } from "../domain/links";
-import { analyzeNote } from "./model";
-import { useKnowledge } from "./index";
+import { useKnowledge, useKnowledgeNote } from "./index";
 import { PropertiesFields } from "./PropertiesFields";
 import "./note-details.css";
 
@@ -20,35 +19,9 @@ export function NoteDetails({
     document.getSnapshot,
   );
   const entries = useApp((state) => state.entries);
-  const workspace = useApp((state) =>
-    state.workspaces.find((item) => item.id === document.workspaceId),
-  );
   const { notes, loading, errors } = useKnowledge();
-  const content = document.content;
-  const current = useMemo(
-    () =>
-      analyzeNote(
-        {
-          workspaceId: document.workspaceId,
-          workspaceName: workspace?.name ?? "",
-          color: workspace?.color ?? "",
-          path: snapshot.path,
-          title: snapshot.title,
-          kind: "note",
-          tags: [],
-          modified: 0,
-        },
-        content,
-      ),
-    [
-      document.workspaceId,
-      workspace?.name,
-      workspace?.color,
-      snapshot.path,
-      snapshot.title,
-      content,
-    ],
-  );
+  const current = useKnowledgeNote(document.workspaceId, snapshot.path);
+  const headings = current?.headings ?? [];
   const backlinks = useMemo(
     () =>
       notes.flatMap((note) => {
@@ -84,10 +57,10 @@ export function NoteDetails({
       </div>
       <section aria-label="Heading outline">
         <h3>Outline</h3>
-        {!current.headings.length && (
+        {!headings.length && (
           <p className="muted">Headings will appear here.</p>
         )}
-        {current.headings.map((heading) => (
+        {headings.map((heading) => (
           <button
             key={heading.offset}
             className="note-details-link"

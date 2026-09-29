@@ -47,6 +47,7 @@ On NVIDIA/Wayland, startup applies `__NV_DISABLE_EXPLICIT_SYNC=1` unless explici
 - Debounced autosave with Saving/Saved/Failed states in the bottom status bar, retry, and Save a copy. Saving and renaming share a document queue so typing can continue during disk writes.
 - New filenames follow the title until manually renamed. Existing files retain their names. Clicking the filename above a note opens rename/move.
 - Atomic writes, revision conflict detection, and save-before-close. A failed save keeps the window open and retains the text in memory.
+- Moves reconcile open notes, tabs, pins, folder selection and appearance together. Typing can continue during a move; subsequent save or reread failures retain the buffer and report a warning separately from the committed move. Closing waits for queued relocations and note creation.
 
 ## Keyboard
 
@@ -77,6 +78,8 @@ cd src-tauri
 cargo test
 cargo clippy --all-targets -- -D warnings
 ```
+
+Architecture verification on 2026-09-30: 108 frontend tests passed with one existing opt-in performance test skipped; all 64 native tests passed. TypeScript, strict Clippy, Rust formatting and the desktop release build passed. Browser demo checks exercised note/folder relocation with open tabs and pins, popup autofocus, unsaved outline updates with an unchanged title, mixed paragraph direction and content results at moved paths. Native rewrite and partial-failure behavior were verified against temporary files in Rust tests. See [native contracts](docs/native-contract.md) and [workflow checks](docs/note-workflows.md).
 
 Earlier baseline verification on 2026-09-29 (new workflow checks are documented in [docs/note-workflows.md](docs/note-workflows.md)):
 
