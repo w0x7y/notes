@@ -30,6 +30,10 @@ export class Relocations {
     return this.changes;
   }
 
+  invalidateReads(): void {
+    this.changes++;
+  }
+
   async whenIdle(): Promise<void> {
     let pending: Promise<void>;
     do {

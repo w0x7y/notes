@@ -34,7 +34,7 @@ export class DocumentLifetime {
     if (this.retiring.has(id))
       return Promise.reject(
         new Error(
-          "This workspace is being removed. Try again after reopening it.",
+          "This workspace is being changed. Try again when the operation finishes.",
         ),
       );
     return this.track(id, operation);
@@ -251,14 +251,33 @@ export class DocumentLifetime {
     }
   }
 
+  retireFolder<T>(
+    id: string,
+    prepare: () => Promise<void>,
+    commit: () => Promise<T>,
+    contains: (path: string) => boolean,
+  ): Promise<T> {
+    return this.beginRetirement(id, prepare, commit, contains, false);
+  }
+
   retireWorkspace<T>(
     id: string,
     prepare: () => Promise<void>,
     commit: () => Promise<T>,
   ): Promise<T> {
+    return this.beginRetirement(id, prepare, commit, () => true, true);
+  }
+
+  private beginRetirement<T>(
+    id: string,
+    prepare: () => Promise<void>,
+    commit: () => Promise<T>,
+    contains: (path: string) => boolean,
+    permanent: boolean,
+  ): Promise<T> {
     if (this.retiring.has(id))
       return Promise.reject(
-        new Error("This workspace is already being removed."),
+        new Error("This workspace is already being changed."),
       );
     this.retiring.add(id);
     const registrations = [...this.accepted]
@@ -269,10 +288,14 @@ export class DocumentLifetime {
       registrations,
       prepare,
       commit,
+      contains,
     );
     this.retirements.set(id, result);
     void result.then(
-      () => this.retirements.delete(id),
+      () => {
+        this.retirements.delete(id);
+        if (!permanent) this.retiring.delete(id);
+      },
       () => this.retirements.delete(id),
     );
     return result;
@@ -283,13 +306,16 @@ export class DocumentLifetime {
     registrations: Promise<unknown>[],
     prepare: () => Promise<void>,
     commit: () => Promise<T>,
+    contains: (path: string) => boolean,
   ): Promise<T> {
     const unlocks: (() => void)[] = [];
     try {
       await Promise.all(registrations);
       await this.settleAccepted(id);
       await prepare();
-      const documents = this.documents(id);
+      const documents = this.documents(id).filter((document) =>
+        contains(document.getSnapshot().path),
+      );
       unlocks.push(...documents.map((document) => document.holdEdits()));
       await Promise.all(documents.map((document) => document.flush()));
       const result = await commit();

@@ -300,9 +300,62 @@ export const renameImage = (id: string, path: string, destination: string) =>
 export async function deleteEntry(
   id: string,
   path: string,
-  kind: "note" | "image",
+  kind: Entry["kind"],
   note?: NoteDocument,
 ): Promise<void> {
+  if (kind === "folder") {
+    const resolvedPath = relocations.afterMoves(id, path);
+    const contains = (candidate: string) =>
+      candidate === path || candidate.startsWith(path + "/");
+    const result = await lifetime.retireFolder(
+      id,
+      async () => {
+        path = await resolvedPath;
+        await Promise.all(
+          lifetime
+            .documents(id)
+            .filter((document) => contains(document.getSnapshot().path))
+            .map((document) => document.flush()),
+        );
+        await persistNow();
+      },
+      async () => {
+        const result = await files.deleteFile(id, path, null);
+        relocations.invalidateReads();
+        return result;
+      },
+      contains,
+    );
+    for (const tab of useApp.getState().sessions[id]?.tabs ?? [])
+      if (contains(tab)) removeTab(id, tab);
+    forgetFavorites(id, path, true);
+    useApp.setState((state) => ({
+      entries: {
+        ...state.entries,
+        [id]: (state.entries[id] ?? []).filter(
+          (entry) => !contains(entry.path),
+        ),
+      },
+      appearances: {
+        ...state.appearances,
+        [id]: Object.fromEntries(
+          Object.entries(state.appearances[id] ?? {}).filter(
+            ([entryPath]) => !contains(entryPath),
+          ),
+        ),
+      },
+      selectedFolder:
+        state.activeWorkspaceId === id && contains(state.selectedFolder)
+          ? ""
+          : state.selectedFolder,
+      navigation:
+        state.navigation?.workspaceId === id && contains(state.navigation.path)
+          ? null
+          : state.navigation,
+    }));
+    if (result.warnings.length) showError(result.warnings.join("\n"));
+    return;
+  }
   return lifetime.retirePath(id, path, async () => {
     path = await relocations.afterMoves(id, path);
     const document =
@@ -316,6 +369,7 @@ export async function deleteEntry(
         currentPath,
         document?.file.revision ?? null,
       );
+      relocations.invalidateReads();
       forgetFavorites(id, currentPath);
       removeTab(id, currentPath);
       useApp.setState((state) => {

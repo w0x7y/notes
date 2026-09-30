@@ -225,14 +225,30 @@ export function createDemoFiles(): FileService {
       return { path: name, rewritten: [], warnings: [] };
     },
     deleteFile: async (id, path, expected) => {
-      if (images.has(`${id}:${path}`)) images.delete(`${id}:${path}`);
+      workspace(id);
+      const folder = folders.get(id)?.has(path) ?? false;
+      const contains = (candidate: string) =>
+        candidate === path || (folder && candidate.startsWith(path + "/"));
+      if (folder) {
+        for (const entry of folders.get(id) ?? [])
+          if (contains(entry)) folders.get(id)?.delete(entry);
+        for (const [key, note] of files)
+          if (key.startsWith(id + ":") && contains(note.path))
+            files.delete(key);
+        for (const [key, image] of images)
+          if (key.startsWith(id + ":") && contains(image.path))
+            images.delete(key);
+      } else if (images.has(`${id}:${path}`)) images.delete(`${id}:${path}`);
       else {
         const note = read(id, path);
         if (expected !== note.revision)
           throw new Error("The file changed outside this editor.");
         files.delete(`${id}:${path}`);
       }
-      if (settings.appearances[id]) delete settings.appearances[id][path];
+      const appearances = settings.appearances[id];
+      if (appearances)
+        for (const entry of Object.keys(appearances))
+          if (contains(entry)) delete appearances[entry];
       return { warnings: [] };
     },
     loadSettings: async () => structuredClone(settings),

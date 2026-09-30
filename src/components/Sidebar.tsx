@@ -473,17 +473,13 @@ export function Sidebar(props: Props) {
                   ),
                 ),
             },
-            ...(context.entry.kind !== "folder"
-              ? [
-                  {
-                    id: "delete",
-                    label: "Delete…",
-                    danger: true,
-                    icon: <Trash2 size={15} />,
-                    onSelect: () => props.onDelete(context.entry.path),
-                  },
-                ]
-              : []),
+            {
+              id: "delete",
+              label: "Delete…",
+              danger: true,
+              icon: <Trash2 size={15} />,
+              onSelect: () => props.onDelete(context.entry.path),
+            },
           ]}
         />
       )}

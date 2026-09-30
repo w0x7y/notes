@@ -1114,3 +1114,195 @@ it("refreshes a new registration without joining the removed registration's pend
   await Promise.all([oldRefresh, freshRefresh]);
   expect(completedBeforeOldRead).toBe(true);
 });
+
+it("deletes a folder after saving descendants and clears only its tree state", async () => {
+  const app = await import("./app-store");
+  const { files } = await import("../platform");
+  const { toggleFavorite, useLibrary } = await import("../knowledge/library");
+  await app.initialize();
+  const document = await app.loadDocument("algebra", "Lectures/Eigenvalues.md");
+  const outside = await app.loadDocument("algebra", "Practice problems.md");
+  await app.createFolder("algebra", "", "Lectures extra");
+  app.openInSplit("algebra", outside.file.path);
+  app.useApp.setState({
+    selectedFolder: "Lectures",
+    navigation: {
+      workspaceId: "algebra",
+      path: document.file.path,
+      offset: 0,
+      serial: 1,
+    },
+  });
+  await app.setEntryAppearance("algebra", document.file.path, {
+    icon: "book",
+    color: null,
+  });
+  toggleFavorite("algebra", document.file.path);
+  document.edit("# Saved before deleting");
+  const remove = files.deleteFile.bind(files);
+  const trash = vi
+    .spyOn(files, "deleteFile")
+    .mockImplementationOnce(async (...args) => {
+      expect(
+        (await files.readNote("algebra", document.file.path)).content,
+      ).toBe("# Saved before deleting");
+      expect(document.getSnapshot().editable).toBe(false);
+      return remove(...args);
+    });
+  await app.deleteEntry("algebra", "Lectures", "folder");
+  expect(trash).toHaveBeenCalledWith("algebra", "Lectures", null);
+  expect(app.peekDocument("algebra", document.file.path)).toBeUndefined();
+  expect(app.peekDocument("algebra", outside.file.path)).toBe(outside);
+  const state = app.useApp.getState();
+  expect(
+    (state.entries.algebra ?? []).some(
+      (entry) =>
+        entry.path === "Lectures" || entry.path.startsWith("Lectures/"),
+    ),
+  ).toBe(false);
+  expect(
+    (state.entries.algebra ?? []).some(
+      (entry) => entry.path === "Lectures extra",
+    ),
+  ).toBe(true);
+  expect(state.sessions.algebra?.tabs).toEqual([outside.file.path]);
+  expect(state.appearances.algebra?.[document.file.path]).toBeUndefined();
+  expect(state.selectedFolder).toBe("");
+  expect(state.navigation).toBeNull();
+  expect(
+    useLibrary
+      .getState()
+      .favorites.some((item) => item.path === document.file.path),
+  ).toBe(false);
+  expect(
+    (await files.scanWorkspace("algebra")).entries.some((entry) =>
+      entry.path.startsWith("Lectures/"),
+    ),
+  ).toBe(false);
+  await app.loadDocument("algebra", outside.file.path);
+});
+
+it("preserves folder buffers and restores editing when Trash fails", async () => {
+  const app = await import("./app-store");
+  const { files } = await import("../platform");
+  await app.initialize();
+  const document = await app.loadDocument("algebra", "Lectures/Eigenvalues.md");
+  document.edit("# Keep this text");
+  vi.spyOn(files, "deleteFile").mockRejectedValueOnce(
+    new Error("Trash unavailable"),
+  );
+  await expect(
+    app.deleteEntry("algebra", "Lectures", "folder"),
+  ).rejects.toThrow("Trash unavailable");
+  expect(app.peekDocument("algebra", document.file.path)).toBe(document);
+  expect(document.getSnapshot().editable).toBe(true);
+  expect(app.currentSession().tabs).toContain(document.file.path);
+  expect((await files.readNote("algebra", document.file.path)).content).toBe(
+    "# Keep this text",
+  );
+  document.edit("Editing restored");
+});
+
+it("retains unsaved descendants and skips Trash when a folder save fails", async () => {
+  const app = await import("./app-store");
+  const { files } = await import("../platform");
+  await app.initialize();
+  const document = await app.loadDocument("algebra", "Lectures/Eigenvalues.md");
+  document.edit("# Unsaved text");
+  vi.spyOn(files, "saveNote").mockRejectedValueOnce(new Error("Disk full"));
+  const trash = vi.spyOn(files, "deleteFile");
+  await expect(
+    app.deleteEntry("algebra", "Lectures", "folder"),
+  ).rejects.toThrow("Disk full");
+  expect(trash).not.toHaveBeenCalled();
+  expect(document.content).toBe("# Unsaved text");
+  expect(document.dirty).toBe(true);
+  expect(document.getSnapshot().editable).toBe(true);
+  expect(app.peekDocument("algebra", document.file.path)).toBe(document);
+});
+
+it("waits for accepted creation and follows a queued move before deleting a folder", async () => {
+  const app = await import("./app-store");
+  const { files } = await import("../platform");
+  await app.initialize();
+  const move = files.moveFolder.bind(files);
+  const started = barrier(),
+    release = barrier();
+  vi.spyOn(files, "moveFolder").mockImplementationOnce(async (...args) => {
+    started.resolve();
+    await release.promise;
+    return move(...args);
+  });
+  const moving = app.moveFolder("algebra", "Lectures", "Renamed");
+  await started.promise;
+  const creating = app.newNote("algebra", "Lectures");
+  const deleting = app.deleteEntry("algebra", "Lectures", "folder");
+  await expect(
+    app.loadDocument("algebra", "Lectures/Eigenvalues.md"),
+  ).rejects.toThrow("workspace is being changed");
+  release.resolve();
+  await Promise.all([moving, creating, deleting]);
+  expect(
+    app.currentSession().tabs.every((path) => !path.startsWith("Renamed/")),
+  ).toBe(true);
+  expect(
+    app.useApp
+      .getState()
+      .entries.algebra?.some(
+        (entry) =>
+          entry.path === "Renamed" || entry.path.startsWith("Renamed/"),
+      ),
+  ).toBe(false);
+  expect(
+    (await files.scanWorkspace("algebra")).entries.some(
+      (entry) => entry.path === "Renamed",
+    ),
+  ).toBe(false);
+});
+
+it("ignores a stale workspace refresh after folder deletion", async () => {
+  const app = await import("./app-store");
+  const { files } = await import("../platform");
+  await app.initialize();
+  const scan = files.scanWorkspace.bind(files);
+  const started = barrier(),
+    release = barrier();
+  vi.spyOn(files, "scanWorkspace").mockImplementationOnce(async (...args) => {
+    const snapshot = await scan(...args);
+    started.resolve();
+    await release.promise;
+    return snapshot;
+  });
+  const refreshing = app.refreshWorkspace("algebra");
+  await started.promise;
+  await app.deleteEntry("algebra", "Lectures", "folder");
+  release.resolve();
+  await refreshing;
+  expect(
+    app.useApp
+      .getState()
+      .entries.algebra?.some(
+        (entry) =>
+          entry.path === "Lectures" || entry.path.startsWith("Lectures/"),
+      ),
+  ).toBe(false);
+});
+
+it("allows loading the remaining pane as soon as deleted folder tabs disappear", async () => {
+  const app = await import("./app-store");
+  await app.initialize();
+  let loading: Promise<unknown> | undefined;
+  const unsubscribe = app.useApp.subscribe((state) => {
+    if (!state.entries.algebra?.some((entry) => entry.path === "Lectures"))
+      loading ??= app.loadDocument("algebra", "Practice problems.md").then(
+        () => "loaded",
+        () => "rejected",
+      );
+  });
+  try {
+    await app.deleteEntry("algebra", "Lectures", "folder");
+    expect(await loading).toBe("loaded");
+  } finally {
+    unsubscribe();
+  }
+});

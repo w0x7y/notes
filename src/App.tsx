@@ -141,7 +141,7 @@ type Modal =
       kind: "delete";
       id: string;
       path: string;
-      entryKind: "note" | "image";
+      entryKind: "note" | "image" | "folder";
       document?: NoteDocument;
     }
   | { kind: "remove-workspace"; id: string; name: string; path: string }
@@ -451,12 +451,12 @@ export default function App() {
                   }),
                 ),
               );
-            else if (entry?.kind === "image")
+            else if (entry)
               setModal({
                 kind: "delete",
                 id: workspace.id,
                 path,
-                entryKind: "image",
+                entryKind: entry.kind,
               });
           }}
           onWorkspace={switchWorkspace}
@@ -756,14 +756,22 @@ export default function App() {
         )}
         {modal?.kind === "delete" && (
           <ConfirmDialog
-            title="Delete file?"
+            title={
+              modal.entryKind === "folder" ? "Delete folder?" : "Delete file?"
+            }
             description={
-              files.kind === "demo"
-                ? "Remove this file from the demo?"
-                : "Move this file to Trash? You can restore it using your file manager."
+              modal.entryKind === "folder"
+                ? files.kind === "demo"
+                  ? "Remove this folder and all its contents from the demo?"
+                  : "Move this folder and all its contents to Trash? You can restore them using your file manager."
+                : files.kind === "demo"
+                  ? "Remove this file from the demo?"
+                  : "Move this file to Trash? You can restore it using your file manager."
             }
             detail={modal.path}
-            submitLabel="Delete file"
+            submitLabel={
+              modal.entryKind === "folder" ? "Delete folder" : "Delete file"
+            }
             onClose={closeModal}
             onConfirm={() =>
               deleteEntry(modal.id, modal.path, modal.entryKind, modal.document)

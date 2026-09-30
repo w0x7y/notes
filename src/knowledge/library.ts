@@ -97,14 +97,20 @@ export function remapFavorites(
       ),
     });
 }
-export function forgetFavorites(workspaceId: string, path?: string) {
+export function forgetFavorites(
+  workspaceId: string,
+  path?: string,
+  descendants = false,
+) {
   const state = useLibrary.getState();
   save({
     ...state,
     favorites: state.favorites.filter(
       (f) =>
         f.workspaceId !== workspaceId ||
-        (path !== undefined && f.path !== path),
+        (path !== undefined &&
+          f.path !== path &&
+          (!descendants || !f.path.startsWith(path + "/"))),
     ),
   });
 }

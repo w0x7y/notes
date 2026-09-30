@@ -1467,7 +1467,12 @@ struct FakeTrash(std::sync::Mutex<Vec<std::path::PathBuf>>);
 impl notes_lib::service::Trash for FakeTrash {
     fn delete(&self, path: &std::path::Path) -> Result<(), String> {
         self.0.lock().unwrap().push(path.to_path_buf());
-        fs::remove_file(path).map_err(|e| e.to_string())
+        if path.is_dir() {
+            fs::remove_dir_all(path)
+        } else {
+            fs::remove_file(path)
+        }
+        .map_err(|e| e.to_string())
     }
 }
 
@@ -2047,4 +2052,182 @@ fn workspace_scan_skips_dependency_trees_but_keeps_real_note_folders() {
         .entries
         .iter()
         .any(|entry| entry.path == "Readme.md"));
+}
+
+#[test]
+fn folder_delete_trashes_the_tree_and_prunes_descendant_metadata() {
+    use notes_lib::model::Appearance;
+    let config = tempdir().unwrap();
+    let fake = std::sync::Arc::new(FakeTrash::default());
+    let service = Service::with_trash(config.path().to_path_buf(), fake.clone()).unwrap();
+    let root = tempdir().unwrap();
+    fs::create_dir_all(root.path().join("Folder/Nested")).unwrap();
+    fs::create_dir(root.path().join("Folder extra")).unwrap();
+    fs::write(root.path().join("Folder/Nested/image.png"), "pixels").unwrap();
+    fs::write(root.path().join("Folder/other.txt"), "unindexed file").unwrap();
+    fs::write(root.path().join("outside.md"), "keep").unwrap();
+    let id = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    let created = service.create_note(&id, "Folder/Nested").unwrap();
+    for path in ["Folder", &created.path, "outside.md"] {
+        service
+            .set_entry_appearance(
+                &id,
+                path,
+                Appearance {
+                    icon: None,
+                    color: Some("#123456".into()),
+                },
+            )
+            .unwrap();
+    }
+    service.save_sessions(serde_json::from_value(serde_json::json!({id.clone(): {"tabs": [created.path, "Folder/Nested/image.png", "outside.md"], "primary": created.path, "secondary": "outside.md", "split": true}})).unwrap(), Some(id.clone()), false).unwrap();
+    service.delete_file(&id, "Folder", None).unwrap();
+    assert_eq!(*fake.0.lock().unwrap(), vec![root.path().join("Folder")]);
+    assert!(!root.path().join("Folder").exists());
+    assert!(root.path().join("Folder extra").exists());
+    assert!(root.path().join("outside.md").exists());
+    let settings = service.load_settings().unwrap();
+    assert_eq!(settings.sessions[&id].tabs, ["outside.md"]);
+    assert_eq!(
+        settings.sessions[&id].primary.as_deref(),
+        Some("outside.md")
+    );
+    assert!(!settings.sessions[&id].split);
+    assert_eq!(settings.appearances[&id].len(), 1);
+    let stored: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(config.path().join("notes.json")).unwrap())
+            .unwrap();
+    assert!(stored["auto_names"].as_object().unwrap().is_empty());
+    assert!(service.delete_file(&id, "", None).is_err());
+    assert!(service.delete_file(&id, "../", None).is_err());
+}
+
+#[test]
+fn folder_trash_failure_preserves_contents_and_metadata() {
+    use notes_lib::model::Appearance;
+    let config = tempdir().unwrap();
+    let service = Service::with_trash(
+        config.path().to_path_buf(),
+        std::sync::Arc::new(RejectTrash),
+    )
+    .unwrap();
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("Folder")).unwrap();
+    fs::write(root.path().join("Folder/a.md"), "keep").unwrap();
+    let id = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    service
+        .set_entry_appearance(
+            &id,
+            "Folder/a.md",
+            Appearance {
+                icon: None,
+                color: Some("#123456".into()),
+            },
+        )
+        .unwrap();
+    let before = service.load_settings().unwrap();
+    assert!(service
+        .delete_file(&id, "Folder", None)
+        .unwrap_err()
+        .contains("Trash unavailable"));
+    assert!(root.path().join("Folder/a.md").exists());
+    assert_eq!(
+        service.load_settings().unwrap().appearances,
+        before.appearances
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn folder_deletion_rejects_symlink_paths_and_keeps_link_targets() {
+    use std::os::unix::fs::symlink;
+    let config = tempdir().unwrap();
+    let fake = std::sync::Arc::new(FakeTrash::default());
+    let service = Service::with_trash(config.path().to_path_buf(), fake.clone()).unwrap();
+    let root = tempdir().unwrap();
+    let outside = tempdir().unwrap();
+    fs::write(outside.path().join("keep.md"), "keep").unwrap();
+    fs::create_dir(root.path().join("Folder")).unwrap();
+    symlink(outside.path(), root.path().join("Link")).unwrap();
+    symlink(outside.path(), root.path().join("Folder/Link")).unwrap();
+    let id = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    assert!(service.delete_file(&id, "Link", None).is_err());
+    assert!(fake.0.lock().unwrap().is_empty());
+    service.delete_file(&id, "Folder", None).unwrap();
+    assert_eq!(
+        fs::read_to_string(outside.path().join("keep.md")).unwrap(),
+        "keep"
+    );
+}
+
+#[test]
+fn committed_folder_deletion_reports_metadata_write_failures() {
+    let config = tempdir().unwrap();
+    let service = Service::with_trash(
+        config.path().to_path_buf(),
+        std::sync::Arc::new(FakeTrash::default()),
+    )
+    .unwrap();
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("Empty")).unwrap();
+    let id = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    fs::remove_file(config.path().join("notes.json")).unwrap();
+    fs::create_dir(config.path().join("notes.json")).unwrap();
+    let result = service.delete_file(&id, "Empty", None).unwrap();
+    assert!(!root.path().join("Empty").exists());
+    assert!(!result.warnings.is_empty());
+}
+
+#[test]
+fn folder_deletion_rejects_overlap_with_other_registered_workspaces() {
+    let config = tempdir().unwrap();
+    let fake = std::sync::Arc::new(FakeTrash::default());
+    let service = Service::with_trash(config.path().to_path_buf(), fake.clone()).unwrap();
+    let root = tempdir().unwrap();
+    fs::create_dir_all(root.path().join("Shared/Nested")).unwrap();
+    fs::write(root.path().join("Shared/Nested/note.md"), "keep").unwrap();
+    let parent = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    let child = service
+        .add_workspace(root.path().join("Shared").to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    for (id, path) in [
+        (&parent, "Shared"),
+        (&parent, "Shared/Nested"),
+        (&child, "Nested"),
+    ] {
+        assert!(service
+            .delete_file(id, path, None)
+            .unwrap_err()
+            .contains("another open workspace"));
+    }
+    assert!(fake.0.lock().unwrap().is_empty());
+    assert_eq!(
+        fs::read_to_string(root.path().join("Shared/Nested/note.md")).unwrap(),
+        "keep"
+    );
+    service.remove_workspace(&child).unwrap();
+    service.delete_file(&parent, "Shared", None).unwrap();
+    assert!(!root.path().join("Shared").exists());
 }

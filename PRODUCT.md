@@ -26,7 +26,7 @@ A student and developer replacing their Obsidian workflow with a focused, keyboa
 - Each workspace remembers its own tabs and split-pane layout. Opening a visible note focuses its pane. Closing or collapsing a split keeps the remaining note reachable. Middle-click closes a tab after saving, including a focused property draft.
 - Notes, images, and folders can each use a custom icon and name color. The complete installed free Lucide catalog is searchable and bundled offline without an account. Workspaces use the same icon picker.
 - File context menus rename/move notes and images, and delete them by moving them to desktop Trash.
-- Folder context menus rename/move folders. Sidebar files and folders can be dragged onto another folder or the Files heading to move them within the workspace.
+- Folder context menus rename/move folders or delete them by moving the folder and all its contents to desktop Trash after confirmation. Open notes inside the folder save before deletion; failure retains their buffers and tabs. Sidebar files and folders can be dragged onto another folder or the Files heading to move them within the workspace.
 - Workspace settings can remove a registration while leaving its directory and files untouched.
 - Raw Markdown is the default. Editable preview reveals the active paragraph's source.
 - English interface, mixed Hebrew and English notes, automatic direction per paragraph, left-to-right code.

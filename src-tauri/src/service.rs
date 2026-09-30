@@ -104,13 +104,16 @@ fn remap_tree_path(path: &str, old: &str, new: &str) -> Option<String> {
         .then(|| format!("{new}{}", &path[old.len()..]))
 }
 
-fn remove_session_path(settings: &mut Settings, id: &str, path: &str) {
+fn remove_session_path(settings: &mut Settings, id: &str, path: &str, folder: bool) {
+    let matches = |candidate: &str| {
+        candidate == path || (folder && candidate.starts_with(&format!("{path}/")))
+    };
     if let Some(session) = settings.sessions.get_mut(id) {
-        session.tabs.retain(|tab| tab != path);
-        if session.primary.as_deref() == Some(path) {
+        session.tabs.retain(|tab| !matches(tab));
+        if session.primary.as_deref().is_some_and(matches) {
             session.primary = None;
         }
-        if session.secondary.as_deref() == Some(path) {
+        if session.secondary.as_deref().is_some_and(matches) {
             session.secondary = None;
         }
         if session.primary.is_none() && session.secondary.is_some() {
@@ -794,35 +797,50 @@ impl Service {
         let mut state = self.state.lock().map_err(|_| "Settings lock failed")?;
         let selected = workspace(&state.settings, id)?;
         let target = resolve(Path::new(&selected.path), path, false)?;
-        if !fs::symlink_metadata(&target)
-            .map_err(|e| err("Cannot inspect file", e))?
-            .is_file()
+        let metadata = fs::symlink_metadata(&target).map_err(|e| err("Cannot inspect entry", e))?;
+        let folder = metadata.is_dir();
+        if folder
+            && state.settings.workspaces.iter().any(|other| {
+                let other_root = Path::new(&other.path);
+                other.id != id
+                    && (target.starts_with(other_root) || other_root.starts_with(&target))
+            })
         {
-            return Err("Only files can be moved to Trash".into());
+            return Err("This folder overlaps another open workspace. Remove that workspace from the app before deleting the folder.".into());
         }
-        if is_note(&target) {
+        if !folder && !metadata.is_file() {
+            return Err("Only regular files and folders can be moved to Trash".into());
+        }
+        if !folder && is_note(&target) {
             let expected = expected.ok_or("Revision is required to delete a note")?;
             if revision(&note_content(&target)?) != expected {
                 return Err("Note changed externally. Reload before deleting.".into());
             }
-        } else if !is_image(&target) {
-            return Err("Only Markdown notes and supported images can be deleted".into());
+        } else if !folder && !is_image(&target) {
+            return Err("Only Markdown notes, supported images and folders can be deleted".into());
         }
+        let path = normalized_relative(Path::new(&selected.path), &target)?;
+        let matches = |candidate: &str| {
+            candidate == path || (folder && candidate.starts_with(&format!("{path}/")))
+        };
         let deletion = self.trash.delete(&target);
         self.scan_cache.invalidate(&target);
         deletion?;
-        state.auto_names.remove(&key(id, path));
+        let workspace_prefix = format!("{id}\0");
+        state
+            .auto_names
+            .retain(|entry, _| !entry.strip_prefix(&workspace_prefix).is_some_and(matches));
         if let Some(appearances) = state.settings.appearances.get_mut(id) {
-            appearances.remove(path);
+            appearances.retain(|entry, _| !matches(entry));
             if appearances.is_empty() {
                 state.settings.appearances.remove(id);
             }
         }
-        remove_session_path(&mut state.settings, id, path);
+        remove_session_path(&mut state.settings, id, &path, folder);
         let mut warnings = Vec::new();
         if let Err(error) = self.persist(&state) {
             warnings.push(format!(
-                "File moved to Trash, but metadata was not saved: {error}"
+                "Entry moved to Trash, but metadata was not saved: {error}"
             ));
         }
         Ok(DeleteResult { warnings })
