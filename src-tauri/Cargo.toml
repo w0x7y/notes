@@ -13,10 +13,10 @@ name = "notes"
 path = "src/main.rs"
 
 [dependencies]
-tauri = { version = "2", features = [] }
-tauri-plugin-dialog = "2"
-tauri-plugin-clipboard-manager = "2"
-tauri-plugin-opener = "2"
+tauri = { version = "=2.9.5", features = [] }
+tauri-plugin-dialog = { version = "=2.6.0", default-features = false, features = ["xdg-portal"] }
+tauri-plugin-clipboard-manager = "=2.3.2"
+tauri-plugin-opener = "=2.5.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
@@ -34,4 +34,23 @@ trash = "5.2"
 quick-xml = "0.42"
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "=2.5.3", features = [] }
+
+# Isolated GTK 4 experiment, pinned upstream source archives.
+[patch.crates-io]
+tauri = { path = "/home/idan/.cache/notes-gtk4-experiment/upstream/tauri-402ebddca9c2891594341edc7f5967ed1f6ded54/crates/tauri" }
+tauri-runtime = { path = "/home/idan/.cache/notes-gtk4-experiment/upstream/tauri-402ebddca9c2891594341edc7f5967ed1f6ded54/crates/tauri-runtime" }
+tauri-runtime-wry = { path = "/home/idan/.cache/notes-gtk4-experiment/upstream/tauri-402ebddca9c2891594341edc7f5967ed1f6ded54/crates/tauri-runtime-wry" }
+tauri-macros = { path = "/home/idan/.cache/notes-gtk4-experiment/upstream/tauri-402ebddca9c2891594341edc7f5967ed1f6ded54/crates/tauri-macros" }
+tauri-utils = { path = "/home/idan/.cache/notes-gtk4-experiment/upstream/tauri-402ebddca9c2891594341edc7f5967ed1f6ded54/crates/tauri-utils" }
+tauri-build = { path = "/home/idan/.cache/notes-gtk4-experiment/upstream/tauri-402ebddca9c2891594341edc7f5967ed1f6ded54/crates/tauri-build" }
+tauri-codegen = { path = "/home/idan/.cache/notes-gtk4-experiment/upstream/tauri-402ebddca9c2891594341edc7f5967ed1f6ded54/crates/tauri-codegen" }
+tauri-plugin = { path = "/home/idan/.cache/notes-gtk4-experiment/upstream/tauri-402ebddca9c2891594341edc7f5967ed1f6ded54/crates/tauri-plugin" }
+tao = { path = "/home/idan/.cache/notes-gtk4-experiment/upstream/tao-dfa8a322eef7f5b8a6a8a9dcbe7924dd3be0cdeb" }
+wry = { path = "/home/idan/.cache/notes-gtk4-experiment/upstream/wry-7222c92af3c91998ee37e8ee1635fb3830a13c82" }
+muda = { path = "/home/idan/.cache/notes-gtk4-experiment/upstream/muda-350b9bda3eabd7327e1a2592019cd33e7f559d44" }
+
+tray-icon = { path = "/home/idan/.cache/notes-gtk4-experiment/upstream/tray-icon-1d014fd17ceef7eb0d1841c4a62675fa754ee02b" }
+
+[dev-dependencies]
+glib = "0.21"

@@ -111,3 +111,5 @@ Earlier baseline verification on 2026-09-29 (new workflow checks are documented 
 This project is licensed under the [MIT License](LICENSE).
 
 Lucide, its Feather-derived icons, D3 graph modules, and adapted CodeMirror/Lezer editor code have license notices in `public/THIRD_PARTY_NOTICES.txt`, which is embedded in the desktop frontend build.
+
+GTK 4 compatibility experiment: see [the test report](docs/gtk4-experiment-2026-09-30.md). This worktree uses pinned experimental upstream sources and is not the production dependency configuration.
