@@ -11,10 +11,18 @@ import { MenuButton } from "./PopupMenu";
 import "./settings.css";
 import { BundlingPreview } from "../knowledge/BundlingPreview";
 import "../knowledge/graph.css";
+import { ThemePicker } from "../theme/ThemePicker";
 
 type Section =
-  "Editor" | "Saving" | "Search" | "Graph" | "Workspace" | "Shortcuts";
+  | "Appearance"
+  | "Editor"
+  | "Saving"
+  | "Search"
+  | "Graph"
+  | "Workspace"
+  | "Shortcuts";
 const sections: Section[] = [
+  "Appearance",
   "Editor",
   "Saving",
   "Search",
@@ -90,7 +98,7 @@ function Choice<T extends string | number>({
 }
 export function SettingsDialog({
   onClose,
-  initialSection = "Editor",
+  initialSection = "Appearance",
 }: {
   onClose: () => void;
   initialSection?: Section;
@@ -164,6 +172,24 @@ export function SettingsDialog({
             ))}
           </nav>
           <div className="settings-content" aria-label={`${section} settings`}>
+            {section === "Appearance" && (
+              <>
+                <h3>Appearance</h3>
+                <p className="theme-intro">
+                  Choose the colors for your workspace. Graphite + amber is the
+                  Notes signature.
+                </p>
+                <ThemePicker
+                  value={draft.theme}
+                  onChange={(theme) => update("theme", theme)}
+                />
+                <p className="settings-note">
+                  Save changes to apply your theme across notes, search,
+                  drawings, and the graph. Your files and custom workspace
+                  colors stay as they are.
+                </p>
+              </>
+            )}
             {section === "Editor" && (
               <>
                 <h3>Editor</h3>
@@ -200,7 +226,7 @@ export function SettingsDialog({
                 </Row>
                 <Row
                   label="Font family"
-                  hint="Applies to notes and the app interface."
+                  hint="Applies to note text. Navigation and dialogs use a separate sans serif font."
                 >
                   <Choice
                     label="Font family"
@@ -325,7 +351,7 @@ export function SettingsDialog({
                   "Applies when you open a note.",
                 )}
                 <p className="settings-note">
-                  One Dark Pro · automatic English/Hebrew paragraph direction
+                  Automatic English/Hebrew paragraph direction
                 </p>
               </>
             )}

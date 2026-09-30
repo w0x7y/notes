@@ -1,19 +1,57 @@
 import { useState } from "react";
-import { Command } from "lucide-react";
+import {
+  CalendarDays,
+  Command,
+  FilePlus2,
+  FolderOpen,
+  LayoutList,
+  Network,
+  PanelLeft,
+  PanelsLeftRight,
+  RotateCw,
+  Save,
+  Search,
+  Settings,
+  SquarePen,
+  type LucideIcon,
+} from "lucide-react";
 import { Dialog } from "../components/Dialog";
-import { showError } from "../domain/app-store";
+import { BrandMark } from "../components/BrandMark";
+import type {
+  WorkspaceCommand,
+  WorkspaceCommandId,
+} from "../domain/workspace-commands";
 import "./knowledge.css";
-export type AppCommand = {
-  id: string;
-  label: string;
-  shortcut?: string;
-  run: () => void | Promise<void>;
+const commandIcons: Partial<Record<WorkspaceCommandId, LucideIcon>> = {
+  titles: Search,
+  contents: Search,
+  capture: SquarePen,
+  daily: CalendarDays,
+  workspace: FolderOpen,
+  settings: Settings,
+  save: Save,
+  sidebar: PanelLeft,
+  split: PanelsLeftRight,
+  refresh: RotateCw,
+  graph: Network,
+  tasks: LayoutList,
+  projects: LayoutList,
+  new: FilePlus2,
+  lecture: FilePlus2,
+  templates: FilePlus2,
 };
+
+function CommandIcon({ id }: { id: WorkspaceCommandId }) {
+  const Icon = commandIcons[id] ?? Command;
+  return <Icon size={16} />;
+}
 export function CommandDialog({
   commands,
+  onChoose,
   onClose,
 }: {
-  commands: AppCommand[];
+  commands: WorkspaceCommand[];
+  onChoose: (id: WorkspaceCommandId) => void;
   onClose: () => void;
 }) {
   const [query, setQuery] = useState(""),
@@ -24,19 +62,16 @@ export function CommandDialog({
   );
   const choose = (i: number) => {
     const command = results[i];
-    if (command) {
-      onClose();
-      try {
-        void Promise.resolve(command.run()).catch(showError);
-      } catch (error) {
-        showError(error);
-      }
-    }
+    if (command) onChoose(command.id);
   };
   return (
-    <Dialog title="Commands" onClose={onClose} className="search-dialog">
+    <Dialog
+      title="Commands"
+      onClose={onClose}
+      className="search-dialog command-dialog"
+    >
       <div className="search-field">
-        <Command size={19} />
+        <BrandMark size={24} />
         <input
           autoFocus
           placeholder="Find an action…"
@@ -90,7 +125,10 @@ export function CommandDialog({
             onMouseEnter={() => setSelected(i)}
             onClick={() => choose(i)}
           >
-            <span className="flex-1">{c.label}</span>
+            <span className="command-icon">
+              <CommandIcon id={c.id} />
+            </span>
+            <span className="command-label">{c.label}</span>
             {c.shortcut && <kbd>{c.shortcut}</kbd>}
           </button>
         ))}

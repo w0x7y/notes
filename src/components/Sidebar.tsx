@@ -1,8 +1,4 @@
-import {
-  WorkspaceTools,
-  PinnedNotes,
-  type WorkspaceTool,
-} from "../knowledge/WorkspaceTools";
+import { WorkspaceTools, PinnedNotes } from "../knowledge/WorkspaceTools";
 import { useMemo, useState, type DragEvent, type MouseEvent } from "react";
 import {
   ChevronDown,
@@ -19,14 +15,21 @@ import {
   Trash2,
   Search,
   Settings,
+  CalendarDays,
+  SquarePen,
 } from "lucide-react";
 import { ItemIcon } from "./ItemIcon";
+import { BrandMark } from "./BrandMark";
 import type { Appearance, Entry, Workspace } from "../domain/contracts";
 import { MenuButton, PopupMenu, type MenuAnchor } from "./PopupMenu";
 import { buildFileTree } from "../domain/file-tree";
 import { run, useApp } from "../domain/app-store";
 import { copyText } from "../platform";
 import { basename } from "../domain/notes";
+import type {
+  WorkspaceCommand,
+  WorkspaceCommandId,
+} from "../domain/workspace-commands";
 import { entryColor } from "../domain/appearance";
 
 export function WorkspaceIcon({
@@ -55,10 +58,10 @@ type Props = {
   onDelete: (path: string) => void;
   onWorkspace: (id: string) => void;
   onAddWorkspace: () => void;
-  onSettings: () => void;
   onAppSettings: () => void;
   onSearch: (tag?: string) => void;
-  onTool: (tool: WorkspaceTool) => void;
+  commands: WorkspaceCommand[];
+  onCommand: (id: WorkspaceCommandId) => void;
   onNewNote: () => void;
   onNewFolder: () => void;
 };
@@ -248,9 +251,7 @@ export function Sidebar(props: Props) {
   return (
     <aside className="sidebar">
       <div className="workspace-picker">
-        <span style={{ color: props.workspace?.color ?? "var(--purple)" }}>
-          <WorkspaceIcon icon={props.workspace?.icon ?? "book"} />
-        </span>
+        <BrandMark size={28} />
         <MenuButton
           label="Workspace"
           className="workspace-menu"
@@ -275,14 +276,22 @@ export function Sidebar(props: Props) {
             },
           ]}
         >
-          <span style={{ color: props.workspace?.color ?? undefined }}>
-            {props.workspace?.name ?? "Choose a workspace"}
+          <span className="workspace-identity">
+            <span className="workspace-app-name">Notes</span>
+            <span
+              className="workspace-current"
+              style={{ color: props.workspace?.color ?? undefined }}
+            >
+              {props.workspace && (
+                <WorkspaceIcon icon={props.workspace.icon} size={13} />
+              )}
+              <span dir="auto">
+                {props.workspace?.name ?? "Choose a workspace"}
+              </span>
+            </span>
           </span>
         </MenuButton>
-        <WorkspaceTools
-          onTool={props.onTool}
-          onSettings={props.workspace ? props.onSettings : undefined}
-        />
+        <WorkspaceTools commands={props.commands} onCommand={props.onCommand} />
       </div>
       <button className="sidebar-search" onClick={() => props.onSearch()}>
         <Search size={15} />
@@ -293,6 +302,22 @@ export function Sidebar(props: Props) {
         </span>
         <kbd>Ctrl P</kbd>
       </button>
+      <div className="sidebar-quick-actions" aria-label="Quick notes">
+        <button
+          onClick={() => props.onCommand("capture")}
+          title="Quick capture (Ctrl+Shift+N)"
+        >
+          <SquarePen size={15} />
+          <span>Capture</span>
+        </button>
+        <button
+          onClick={() => props.onCommand("daily")}
+          title="Today's note (Ctrl+Shift+D)"
+        >
+          <CalendarDays size={15} />
+          <span>Today</span>
+        </button>
+      </div>
       <PinnedNotes />
       <div className="sidebar-section">
         <button
@@ -386,9 +411,11 @@ export function Sidebar(props: Props) {
         )}
         {props.workspace && !props.entries.length && (
           <div className="sidebar-empty">
-            No notes yet.
-            <br />
-            Press <kbd>Ctrl N</kbd> to start.
+            <BrandMark size={22} />
+            <span>Your workspace is ready.</span>
+            <button onClick={props.onNewNote}>
+              Create your first note <kbd>Ctrl N</kbd>
+            </button>
           </div>
         )}
       </div>

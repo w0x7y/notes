@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
-import { FileText, Search } from "lucide-react";
 import { openFile, useApp } from "../domain/app-store";
 import { searchNotes } from "../domain/search";
 import { Dialog } from "./Dialog";
+import { BrandMark } from "./BrandMark";
+import { ItemIcon } from "./ItemIcon";
 
 export function SearchDialog({
   onClose,
@@ -17,6 +18,7 @@ export function SearchDialog({
   const workspaces = useApp((state) => state.workspaces);
   const preferences = useApp((state) => state.preferences);
   const current = useApp((state) => state.activeWorkspaceId);
+  const appearances = useApp((state) => state.appearances);
   const index = useMemo(
     () =>
       workspaces.flatMap((workspace) =>
@@ -59,11 +61,11 @@ export function SearchDialog({
           ? "Search this workspace"
           : "Search all notes"
       }
-      className="search-dialog"
+      className="search-dialog note-search-dialog"
       onClose={onClose}
     >
       <div className="search-field">
-        <Search size={19} />
+        <BrandMark size={24} />
         <input
           autoFocus
           aria-label="Search titles and tags"
@@ -120,13 +122,35 @@ export function SearchDialog({
             onMouseEnter={() => setSelected(i)}
             onClick={() => choose(i)}
           >
-            <FileText size={18} style={{ color: result.color }} />
-            <span className="min-w-0 flex-1">
+            <span
+              className="result-note-icon"
+              style={{
+                color:
+                  appearances[result.workspaceId]?.[result.path]?.color ??
+                  result.color,
+              }}
+            >
+              <ItemIcon
+                name={appearances[result.workspaceId]?.[result.path]?.icon}
+                fallback="file"
+                size={17}
+              />
+            </span>
+            <span className="result-content">
               <span className="result-title" dir="auto">
                 {result.title}
               </span>
-              <small>
-                {result.workspaceName} / {result.path}
+              <small className="result-location">
+                <span className="result-workspace">
+                  <span
+                    className="workspace-dot"
+                    style={{ background: result.color }}
+                  />
+                  {result.workspaceName}
+                </span>
+                <span className="result-path" dir="auto">
+                  {result.path}
+                </span>
               </small>
             </span>
             {result.workspaceId === current && (
@@ -140,6 +164,7 @@ export function SearchDialog({
       </div>
       <footer className="dialog-footer">
         <span>
+          {results.length} {results.length === 1 ? "note" : "notes"} ·{" "}
           {preferences.searchScope === "current"
             ? "Current workspace only"
             : preferences.currentWorkspaceFirst

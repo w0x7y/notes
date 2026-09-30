@@ -1,10 +1,10 @@
 # Drawings
 
-Open a note and click **Drawing** beside Preview. Drawings support rectangles,
+Open a note and choose **Drawing** from **More note actions** in the note header. Drawings support rectangles,
 ellipses, lines, arrows, freehand strokes, and multiline English/Hebrew text.
 Choose a stroke color, thickness, optional shape fill, and text size in the toolbar.
 
-Select objects to move them, drag the blue lower-right handle to resize them,
+Select objects to move them, drag the accent-colored lower-right handle to resize them,
 or double-click text to edit it. Undo, redo, duplicate, delete, zoom, and fit are
 available in the toolbar. Changes use the note's existing autosave queue. Text
 also autosaves while its text field is open. Done returns to the note; preview
@@ -48,6 +48,9 @@ Icons, search, renaming, moving, and deleting work through the containing note.
 
 Invalid drawing data and conflicting edits are rejected without replacing the
 source. A failed disk save keeps the drawing in the note buffer and exposes Retry.
+Saving the preview keeps the drawing dialog busy until the SVG, Markdown link,
+and note save complete. Workspace removal and app shutdown wait for this whole
+workflow; closing controls are disabled during export.
 Limits are 1,000 shapes, 5,000 points in one stroke, 50,000 pen points in a scene,
 and 2 million JSON characters. Coordinates serialize to two decimal places.
 

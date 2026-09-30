@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-30T07:56:37.416788+00:00",
+  "title": "Design System: Notes",
+  "extensions": {
+    "shadows": [
+      {
+        "name": "popup-menu",
+        "value": "0 6px 20px #0005",
+        "purpose": "Floating menus above the flat shell."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "sidebar-medium",
+        "value": "1000px"
+      },
+      {
+        "name": "split-header",
+        "value": "900px"
+      },
+      {
+        "name": "sidebar-narrow",
+        "value": "780px"
+      },
+      {
+        "name": "search-footer",
+        "value": "640px"
+      },
+      {
+        "name": "theme-options",
+        "value": "580px"
+      },
+      {
+        "name": "note-details-pane",
+        "value": "650px",
+        "purpose": "Container width where note details overlay their own writing pane."
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Apply settings or open a workspace.",
+      "html": "<button class=\"ds-button ds-primary\">Save changes</button>",
+      "css": ".ds-button{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:8px 13px;border:1px solid var(--border-strong);border-radius:4px;color:var(--text);background:transparent;font-family:var(--font-ui);font-size:12px;cursor:pointer}.ds-button:hover{color:var(--bright);background:var(--hover)}.ds-button:focus-visible{outline:none;background:var(--selection);color:var(--bright)}.ds-button:disabled{opacity:.45;cursor:default}.ds-primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:550}.ds-primary:hover,.ds-primary:focus-visible{background:var(--accent-hover);color:var(--accent-ink)}"
+    },
+    {
+      "name": "Secondary button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Secondary dialog actions.",
+      "html": "<button class=\"ds-button\">Cancel</button>",
+      "css": ".ds-button{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:8px 13px;border:1px solid var(--border-strong);border-radius:4px;color:var(--text);background:transparent;font-family:var(--font-ui);font-size:12px;cursor:pointer}.ds-button:hover{color:var(--bright);background:var(--hover)}.ds-button:focus-visible{outline:none;background:var(--selection);color:var(--bright)}.ds-button:disabled{opacity:.45;cursor:default}"
+    },
+    {
+      "name": "Text field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Dialog text entry.",
+      "html": "<input class=\"ds-input\" aria-label=\"Workspace name\" placeholder=\"Workspace name\">",
+      "css": ".ds-input{font-family:var(--font-ui);font-size:12px;padding:8px 10px;color:var(--text);background:var(--sidebar);border:1px solid var(--border-strong);border-radius:3px;caret-color:var(--accent)}.ds-input::placeholder{color:var(--muted)}.ds-input:focus-visible{outline:none;border-color:var(--accent)}"
+    },
+    {
+      "name": "File navigation",
+      "kind": "nav",
+      "refersTo": "navigation-selected",
+      "description": "Selected note in the workspace tree.",
+      "html": "<button class=\"ds-tree ds-active\" aria-current=\"page\">The next idea</button>",
+      "css": ".ds-tree{display:flex;align-items:center;gap:8px;min-height:29px;width:100%;padding:4px 9px;border:0;border-radius:3px;text-align:left;font-family:var(--font-ui);font-size:12px;background:transparent;color:var(--text);cursor:pointer}.ds-active{background:var(--selection);color:var(--bright)}.ds-tree:hover{background:var(--hover);color:var(--bright)}.ds-tree:focus-visible{outline:none;background:var(--selection);color:var(--bright)}"
+    },
+    {
+      "name": "Theme option",
+      "kind": "card",
+      "refersTo": "theme-option-selected",
+      "description": "Native radio choice with selected fill and border.",
+      "html": "<label class=\"ds-theme\"><input type=\"radio\" name=\"ds-theme\" checked><span>Graphite + amber</span><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><path d=\"m20 6-11 11-5-5\"/></svg></label>",
+      "css": ".ds-theme{display:flex;align-items:center;gap:9px;padding:10px;position:relative;min-width:0;border:1px solid var(--border-strong);border-radius:5px;font-family:var(--font-ui);font-size:12px;color:var(--bright);cursor:pointer}.ds-theme input{position:absolute;width:1px;height:1px;opacity:0}.ds-theme:hover,.ds-theme:focus-within{background:var(--hover)}.ds-theme input:focus-visible{outline:none}.ds-theme svg{color:var(--accent);margin-left:auto;visibility:hidden}.ds-theme:has(input:checked) svg{visibility:visible}.ds-theme:has(input:checked){background:var(--accent-soft);border-color:var(--accent)}"
+    },
+    {
+      "name": "Notes mark",
+      "kind": "custom",
+      "description": "Folded-page bookmark in the current accent.",
+      "html": "<svg class=\"ds-mark\" width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" aria-hidden=\"true\"><path d=\"M5.5 3.5h8l5 5v12h-13z\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linejoin=\"round\"/><path d=\"M13.5 3.5v5h5M9 3.5v9l2-1.5 2 1.5v-9\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linejoin=\"round\"/><path d=\"M9 16.5h6\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\"/></svg>",
+      "css": ".ds-mark{color:var(--accent)}"
+    }
+  ],
+  "narrative": {
+    "overview": "Graphite + amber is the default identity, approved on 2026-09-30. This is a compact desktop writing tool, with a restrained warm palette and thin borders. Its mark is a folded page containing a bookmark, used in the native icon, favicon, workspace header, search, commands, and empty states.",
+    "dos": [
+      "Do use the palette registry's semantic CSS variables for interface colors.",
+      "Do preserve custom content colors, independent editor preferences, and mixed paragraph direction.",
+      "Do preserve compact navigation, popup autofocus, keyboard selection, and collapsed folders."
+    ],
+    "donts": [
+      "Don't add focus outlines, decorative animation, an extra title bar, or per-pane save strips.",
+      "Don't rebuild editors or rescan notes when changing themes."
+    ]
+  }
+}

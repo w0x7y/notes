@@ -8,6 +8,114 @@ fn service() -> (tempfile::TempDir, Service) {
     (config, service)
 }
 
+// Run blocking-file probes in a child so a regression cannot hang the test suite.
+#[cfg(unix)]
+#[test]
+fn special_files_do_not_block_native_reads_or_workspace_scans() {
+    use std::os::unix::ffi::OsStrExt;
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    const MODE: &str = "NOTES_SPECIAL_FILE_PROBE";
+    const CONFIG: &str = "NOTES_SPECIAL_FILE_CONFIG";
+    if let Ok(mode) = std::env::var(MODE) {
+        let service = Service::new(std::env::var_os(CONFIG).unwrap().into()).unwrap();
+        let id = service.load_settings().unwrap().workspaces[0].id.clone();
+        assert_eq!(
+            service.read_note(&id, "normal.md").unwrap().content,
+            "# Normal"
+        );
+        let image = service.read_image(&id, "normal.svg").unwrap();
+        assert_eq!(image.mime, "image/svg+xml");
+        assert_eq!(image.data, "PHN2Zy8+");
+        match mode.as_str() {
+            "note" => assert!(service.read_note(&id, "blocked.md").is_err()),
+            "image" => assert!(service.read_image(&id, "blocked.svg").is_err()),
+            "scan" => {
+                let scan = service.scan_workspace(&id).unwrap();
+                assert!(scan.entries.iter().any(|entry| entry.path == "normal.md"));
+                assert!(!scan
+                    .entries
+                    .iter()
+                    .any(|entry| entry.path.starts_with("blocked.")));
+            }
+            _ => panic!("Unknown special-file probe"),
+        }
+        // A rejected read must release the service mutex for other IPC work.
+        assert_eq!(service.load_settings().unwrap().workspaces.len(), 1);
+        return;
+    }
+
+    let (config, service) = service();
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("normal.md"), "# Normal").unwrap();
+    fs::write(root.path().join("normal.svg"), "<svg/>").unwrap();
+    service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap();
+    for name in ["blocked.md", "blocked.svg"] {
+        let path = std::ffi::CString::new(root.path().join(name).as_os_str().as_bytes()).unwrap();
+        // SAFETY: path is a NUL-terminated, owned string; mkfifo retains no pointer.
+        assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
+    }
+    let mut failures = Vec::new();
+    for mode in ["note", "image", "scan"] {
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "special_files_do_not_block_native_reads_or_workspace_scans",
+            ])
+            .env(MODE, mode)
+            .env(CONFIG, config.path())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                if !status.success() {
+                    failures.push(format!("{mode}: failed"));
+                }
+                break;
+            }
+            if Instant::now() >= deadline {
+                child.kill().unwrap();
+                child.wait().unwrap();
+                failures.push(format!("{mode}: blocked on a special file"));
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join(", "));
+}
+
+#[test]
+fn image_reads_keep_the_size_limit_and_reject_directories() {
+    let (_config, service) = service();
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("normal.png"), b"pixels").unwrap();
+    fs::create_dir(root.path().join("folder.png")).unwrap();
+    let large = fs::File::create(root.path().join("large.png")).unwrap();
+    large.set_len(20 * 1024 * 1024 + 1).unwrap();
+    let id = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    assert_eq!(
+        service.read_image(&id, "normal.png").unwrap().data,
+        "cGl4ZWxz"
+    );
+    assert!(service.read_image(&id, "folder.png").is_err());
+    assert!(service
+        .read_image(&id, "large.png")
+        .err()
+        .unwrap()
+        .contains("20 MB"));
+}
+
 #[test]
 fn folder_move_returns_one_final_rewrite_for_all_referenced_targets() {
     let (_config, service) = service();
@@ -1505,9 +1613,129 @@ fn old_settings_receive_complete_preference_defaults() {
             "currentWorkspaceFirst":true,"searchLimit":60,"restoreSession":true,
             "refreshOnFocus":true,"sortFilesBy":"name",
             "customFont":"","fontWeight":400,"letterSpacing":0.0,"noteWidth":940,
-            "graphBundling":0.85
+            "graphBundling":0.85,"theme":"graphite-amber"
         })
     );
+}
+
+#[test]
+fn legacy_preferences_receive_default_theme_without_losing_values() {
+    let config = tempdir().unwrap();
+    fs::write(
+        config.path().join("notes.json"),
+        r#"{"preferences":{"fontSize":18,"graphBundling":0.4},"toolbarVisible":false}"#,
+    )
+    .unwrap();
+    let service = Service::new(config.path().to_path_buf()).unwrap();
+    let settings = serde_json::to_value(service.load_settings().unwrap()).unwrap();
+    assert_eq!(settings["preferences"]["theme"], "graphite-amber");
+    assert_eq!(settings["preferences"]["fontSize"], 18);
+    assert_eq!(settings["preferences"]["graphBundling"], 0.4);
+    assert_eq!(settings["toolbarVisible"], false);
+}
+
+#[test]
+fn themes_persist_across_restart_without_changing_notes_or_other_settings() {
+    use notes_lib::model::{Appearance, Preferences, Session};
+    let (config, service) = service();
+    let root = tempdir().unwrap();
+    let content = "---\ncustom: keep\n---\n# Note\nשלום world\n";
+    fs::write(root.path().join("note.md"), content).unwrap();
+    let workspace = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace;
+    service
+        .set_entry_appearance(
+            &workspace.id,
+            "note.md",
+            Appearance {
+                icon: Some("book".into()),
+                color: Some("#123456".into()),
+            },
+        )
+        .unwrap();
+    service
+        .save_sessions(
+            std::collections::HashMap::from([(
+                workspace.id.clone(),
+                Session {
+                    tabs: vec!["note.md".into()],
+                    primary: Some("note.md".into()),
+                    secondary: None,
+                    split: false,
+                },
+            )]),
+            Some(workspace.id.clone()),
+            false,
+        )
+        .unwrap();
+    let baseline = serde_json::to_value(service.load_settings().unwrap()).unwrap();
+    for theme in [
+        "graphite-amber",
+        "ink-jade",
+        "midnight-ice",
+        "charcoal-coral",
+        "forest-moss",
+        "one-dark-pro",
+    ] {
+        let preferences: Preferences = serde_json::from_value(serde_json::json!({
+            "theme":theme,"fontSize":18,"graphBundling":0.4
+        }))
+        .unwrap();
+        let saved = service.save_preferences(preferences.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&saved).unwrap()["theme"], theme);
+        let restarted = Service::new(config.path().to_path_buf()).unwrap();
+        let settings = restarted.load_settings().unwrap();
+        assert_eq!(settings.preferences, preferences);
+        let settings = serde_json::to_value(settings).unwrap();
+        for field in [
+            "workspaces",
+            "sessions",
+            "activeWorkspaceId",
+            "toolbarVisible",
+            "appearances",
+        ] {
+            assert_eq!(settings[field], baseline[field], "{field}");
+        }
+        assert_eq!(
+            fs::read_to_string(root.path().join("note.md")).unwrap(),
+            content
+        );
+    }
+    service.save_preferences(Preferences::default()).unwrap();
+    let restarted = Service::new(config.path().to_path_buf()).unwrap();
+    assert_eq!(
+        serde_json::to_value(restarted.load_settings().unwrap().preferences).unwrap()["theme"],
+        "graphite-amber"
+    );
+}
+
+#[test]
+fn invalid_themes_cannot_replace_saved_preferences() {
+    use notes_lib::model::Preferences;
+    let (config, service) = service();
+    let preferences: Preferences = serde_json::from_value(serde_json::json!({
+        "theme":"ink-jade","fontSize":18
+    }))
+    .unwrap();
+    service.save_preferences(preferences.clone()).unwrap();
+    let before = fs::read(config.path().join("notes.json")).unwrap();
+    for theme in [
+        serde_json::json!("unknown"),
+        serde_json::json!(""),
+        serde_json::json!("GraphiteAmber"),
+        serde_json::json!("one-dark"),
+        serde_json::Value::Null,
+        serde_json::json!(3),
+    ] {
+        assert!(
+            serde_json::from_value::<Preferences>(serde_json::json!({"theme":theme})).is_err(),
+            "{theme}"
+        );
+    }
+    assert_eq!(service.load_settings().unwrap().preferences, preferences);
+    assert_eq!(fs::read(config.path().join("notes.json")).unwrap(), before);
 }
 
 #[test]
@@ -1744,82 +1972,6 @@ fn scan_cache_isolated_by_workspace_path() {
             format!("Workspace {index}")
         );
     }
-}
-
-#[cfg(unix)]
-#[test]
-fn slow_scan_does_not_block_note_saves_or_other_workspace_scans() {
-    use std::ffi::CString;
-    use std::os::unix::ffi::OsStrExt;
-    use std::os::unix::fs::OpenOptionsExt;
-    use std::sync::{mpsc, Arc};
-    use std::time::{Duration, Instant};
-
-    let (_config, service) = service();
-    let service = Arc::new(service);
-    let root = tempdir().unwrap();
-    let other = tempdir().unwrap();
-    fs::write(root.path().join("a.md"), "# Original").unwrap();
-    fs::write(other.path().join("other.md"), "# Other").unwrap();
-    let id = service
-        .add_workspace(root.path().to_str().unwrap())
-        .unwrap()
-        .workspace
-        .id;
-    let other_id = service
-        .add_workspace(other.path().to_str().unwrap())
-        .unwrap()
-        .workspace
-        .id;
-    let revision = service.read_note(&id, "a.md").unwrap().revision;
-    let fifo_path = root.path().join("slow.md");
-    let fifo_name = CString::new(fifo_path.as_os_str().as_bytes()).unwrap();
-    // A FIFO deterministically holds the scan inside its disk read until this test releases it.
-    assert_eq!(unsafe { libc::mkfifo(fifo_name.as_ptr(), 0o600) }, 0);
-    let scan_service = service.clone();
-    let scan_id = id.clone();
-    let scan = std::thread::spawn(move || scan_service.scan_workspace(&scan_id));
-    let deadline = Instant::now() + Duration::from_secs(3);
-    let fifo_writer = loop {
-        match fs::OpenOptions::new()
-            .write(true)
-            .custom_flags(libc::O_NONBLOCK)
-            .open(&fifo_path)
-        {
-            Ok(writer) => break writer,
-            Err(error)
-                if error.raw_os_error() == Some(libc::ENXIO) && Instant::now() < deadline =>
-            {
-                std::thread::sleep(Duration::from_millis(1));
-            }
-            Err(error) => panic!("scan did not reach the slow read: {error}"),
-        }
-    };
-    let (sender, receiver) = mpsc::channel();
-    let save_service = service.clone();
-    let save = std::thread::spawn(move || {
-        let result = save_service.save_note(&id, "a.md", "# Saved", &revision);
-        sender.send(result).unwrap();
-    });
-    let (other_sender, other_receiver) = mpsc::channel();
-    let other_scan = std::thread::spawn(move || {
-        other_sender
-            .send(service.scan_workspace(&other_id))
-            .unwrap();
-    });
-    let saved_while_scan_blocked = receiver.recv_timeout(Duration::from_secs(1));
-    let other_scanned_while_blocked = other_receiver.recv_timeout(Duration::from_secs(1));
-    // Release the scan before asserting so a failing test always joins all its workers.
-    drop(fifo_writer);
-    scan.join().unwrap().unwrap();
-    save.join().unwrap();
-    other_scan.join().unwrap();
-    assert!(saved_while_scan_blocked.unwrap().is_ok());
-    assert!(other_scanned_while_blocked.unwrap().is_ok());
-    assert_eq!(
-        fs::read_to_string(root.path().join("a.md")).unwrap(),
-        "# Saved"
-    );
 }
 
 #[test]

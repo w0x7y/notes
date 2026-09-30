@@ -1,17 +1,16 @@
 import {
-  createContentNote,
-  loadDocument,
-  newNote,
   openFile,
   refreshWorkspace,
-  registerCaptureWorkspace,
   useApp,
+  withWorkspaceDocuments,
+  withCaptureDocuments,
+  type WorkspaceDocuments,
 } from "../domain/app-store";
 import { files } from "../platform";
 import { expandTemplate, localDate, starterTemplates } from "./template-format";
 export { localDate, starterTemplates } from "./template-format";
 const preparing = new Map<string, Promise<void>>();
-export async function ensureFolder(id: string, folder: string): Promise<void> {
+async function ensureFolder(id: string, folder: string): Promise<void> {
   if (
     useApp
       .getState()
@@ -32,6 +31,11 @@ export async function ensureFolder(id: string, folder: string): Promise<void> {
   await refreshWorkspace(id);
 }
 export function ensureTemplates(id: string): Promise<void> {
+  return withWorkspaceDocuments(id, seedTemplates);
+}
+
+function seedTemplates(documents: WorkspaceDocuments): Promise<void> {
+  const id = documents.id;
   const pending = preparing.get(id);
   if (pending) return pending;
   const request = (async () => {
@@ -39,7 +43,7 @@ export function ensureTemplates(id: string): Promise<void> {
     for (const [name, content] of Object.entries(starterTemplates)) {
       const path = `Templates/${name}.md`;
       if (!useApp.getState().entries[id]?.some((e) => e.path === path))
-        await createContentNote(id, "Templates", content, path, false);
+        await documents.createContent("Templates", content, path, false);
     }
   })().finally(() => preparing.delete(id));
   preparing.set(id, request);
@@ -51,25 +55,32 @@ export async function createFromTemplate(
   title: string,
   folder = "",
 ): Promise<void> {
-  const source = await loadDocument(id, path);
-  await createContentNote(id, folder, expandTemplate(source.content, title));
+  return withWorkspaceDocuments(id, async (documents) => {
+    const source = await documents.load(path);
+    await documents.createContent(
+      folder,
+      expandTemplate(source.content, title),
+    );
+  });
 }
 export async function newLecture(id: string): Promise<void> {
-  await ensureTemplates(id);
-  await createFromTemplate(
-    id,
-    "Templates/Lecture.md",
-    `Lecture ${localDate()}`,
-  );
+  return withWorkspaceDocuments(id, async (documents) => {
+    await seedTemplates(documents);
+    const source = await documents.load("Templates/Lecture.md");
+    await documents.createContent(
+      "",
+      expandTemplate(source.content, `Lecture ${localDate()}`),
+    );
+  });
 }
 let capture: Promise<void> | null = null;
 export function quickCapture(): Promise<void> {
   if (capture) return capture;
-  const request = (async () => {
-    const id = await registerCaptureWorkspace();
+  const request = withCaptureDocuments(async (documents) => {
+    const id = documents.id;
     await ensureFolder(id, "Inbox");
-    await newNote(id, "Inbox");
-  })();
+    await documents.create("Inbox");
+  });
   capture = request.finally(() => {
     capture = null;
   });
@@ -78,24 +89,23 @@ export function quickCapture(): Promise<void> {
 let daily: Promise<void> | null = null;
 export function openDaily(): Promise<void> {
   if (daily) return daily;
-  const request = (async () => {
+  const request = withCaptureDocuments(async (documents) => {
     const date = localDate(),
       path = `Daily/${date}.md`;
-    const id = await registerCaptureWorkspace();
+    const id = documents.id;
     await ensureFolder(id, "Daily");
     if (useApp.getState().entries[id]?.some((e) => e.path === path)) {
       openFile(id, path);
       return;
     }
-    await ensureTemplates(id);
-    const template = await loadDocument(id, "Templates/Daily.md");
-    await createContentNote(
-      id,
+    await seedTemplates(documents);
+    const template = await documents.load("Templates/Daily.md");
+    await documents.createContent(
       "Daily",
       expandTemplate(template.content, date),
       path,
     );
-  })();
+  });
   daily = request.finally(() => {
     daily = null;
   });

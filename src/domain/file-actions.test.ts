@@ -8,6 +8,329 @@ function barrier() {
   return { promise, resolve };
 }
 
+it("clears heading navigation when cycling tabs", async () => {
+  const app = await import("./app-store");
+  await app.initialize();
+  app.openFile("algebra", "Practice problems.md");
+  app.navigateTo("algebra", "Lectures/Eigenvalues.md", 120);
+  app.cycleTab();
+  expect(app.currentSession().primary).toBe("Practice problems.md");
+  expect(app.useApp.getState().navigation).toBeNull();
+});
+
+it("opens beside the destination workspace primary when switching from secondary focus", async () => {
+  const app = await import("./app-store");
+  await app.initialize();
+  app.openFile("algebra", "Practice problems.md");
+  app.openFile("algebra", "Lectures/Eigenvalues.md", "secondary");
+  app.openFile("web", "React.md");
+  app.openInSplit("web", "Components.md");
+  app.openFile("algebra", "Lectures/Eigenvalues.md");
+  app.openInSplit("web", "New.md");
+  expect(app.currentSession().primary).toBe("React.md");
+  expect(app.currentSession().secondary).toBe("New.md");
+  expect(app.useApp.getState().focusedPane).toBe("secondary");
+});
+
+it("preserves the session reference on repeated pane focus", async () => {
+  const app = await import("./app-store");
+  await app.initialize();
+  app.openFile("algebra", "Practice problems.md");
+  const sessions = app.useApp.getState().sessions;
+  const state = app.useApp.getState();
+  app.focusPane("primary");
+  expect(app.useApp.getState()).toBe(state);
+  expect(app.useApp.getState().sessions).toBe(sessions);
+});
+
+it("rejects new document loads while workspace removal waits for an accepted load", async () => {
+  const app = await import("./app-store");
+  const { files } = await import("../platform");
+  await app.initialize();
+  const read = files.readNote.bind(files);
+  const started = barrier();
+  const release = barrier();
+  vi.spyOn(files, "readNote").mockImplementationOnce(async (...args) => {
+    started.resolve();
+    await release.promise;
+    return read(...args);
+  });
+  const accepted = app.loadDocument("algebra", "Practice problems.md");
+  await started.promise;
+  const removing = app.removeWorkspace("algebra");
+  const late = app.loadDocument("algebra", "Lectures/Eigenvalues.md");
+  const outcome = late.then(
+    () => "loaded",
+    () => "rejected",
+  );
+  release.resolve();
+  const document = await accepted;
+  await removing;
+  expect(await outcome).toBe("rejected");
+  expect(
+    app.peekDocument("algebra", document.getSnapshot().path),
+  ).toBeUndefined();
+  expect(
+    app.peekDocument("algebra", "Lectures/Eigenvalues.md"),
+  ).toBeUndefined();
+});
+
+it("saves edits accepted during removal preparation and restores editing when unregistering fails", async () => {
+  const app = await import("./app-store");
+  const { files } = await import("../platform");
+  await app.initialize();
+  const document = await app.loadDocument("algebra", "Practice problems.md");
+  const started = barrier();
+  const release = barrier();
+  vi.spyOn(files, "saveSessions").mockImplementationOnce(async () => {
+    started.resolve();
+    await release.promise;
+  });
+  vi.spyOn(files, "removeWorkspace").mockRejectedValueOnce(
+    new Error("Config full"),
+  );
+  const removing = app.removeWorkspace("algebra");
+  const outcome = removing.catch((error: unknown) => error);
+  await started.promise;
+  document.edit("# Text accepted during preparation");
+  release.resolve();
+  expect(await outcome).toBeInstanceOf(Error);
+  expect(document.dirty).toBe(false);
+  expect(
+    (await files.readNote("algebra", document.getSnapshot().path)).content,
+  ).toBe("# Text accepted during preparation");
+  document.edit("# Editing works after failure");
+  expect(document.content).toBe("# Editing works after failure");
+  expect(
+    app.useApp.getState().workspaces.some((item) => item.id === "algebra"),
+  ).toBe(true);
+});
+
+it("makes deletion read-only only during its final commit and restores editing on failure", async () => {
+  const app = await import("./app-store");
+  const { files } = await import("../platform");
+  await app.initialize();
+  const document = await app.loadDocument("algebra", "Practice problems.md");
+  const started = barrier();
+  const release = barrier();
+  vi.spyOn(files, "deleteFile").mockImplementationOnce(async () => {
+    started.resolve();
+    await release.promise;
+    throw new Error("Trash unavailable");
+  });
+  const deleting = app.deleteEntry(
+    "algebra",
+    "Practice problems.md",
+    "note",
+    document,
+  );
+  const outcome = deleting.catch((error: unknown) => error);
+  await started.promise;
+  expect(app.hasUnsavedChanges()).toBe(true);
+  expect(document.getSnapshot().editable).toBe(false);
+  expect(() =>
+    document.edit("Must not be accepted after deletion starts"),
+  ).toThrow();
+  release.resolve();
+  expect(await outcome).toBeInstanceOf(Error);
+  expect(document.getSnapshot().editable).toBe(true);
+  document.edit("Editing restored");
+  expect(document.content).toBe("Editing restored");
+});
+
+it("includes accepted note creation in the before-unload warning before it registers a buffer", async () => {
+  const app = await import("./app-store");
+  const { files } = await import("../platform");
+  await app.initialize();
+  const create = files.createNote.bind(files);
+  const started = barrier(),
+    release = barrier();
+  vi.spyOn(files, "createNote").mockImplementationOnce(async (...args) => {
+    started.resolve();
+    await release.promise;
+    return create(...args);
+  });
+  const creating = app.newNote("algebra");
+  await started.promise;
+  expect(app.hasUnsavedChanges()).toBe(true);
+  release.resolve();
+  await creating;
+  expect(app.hasUnsavedChanges()).toBe(false);
+});
+
+it("waits for capture registration and folder preparation before shutdown finishes", async () => {
+  const app = await import("./app-store");
+  const { files } = await import("../platform");
+  const { quickCapture } = await import("../knowledge/templates");
+  await app.initialize();
+  const ensure = files.ensureCaptureWorkspace.bind(files);
+  const started = barrier(),
+    release = barrier();
+  vi.spyOn(files, "ensureCaptureWorkspace").mockImplementationOnce(async () => {
+    started.resolve();
+    await release.promise;
+    return ensure();
+  });
+  const capturing = quickCapture();
+  await started.promise;
+  let finished = false;
+  const closing = app.flushAll().then(() => {
+    finished = true;
+  });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(finished).toBe(false);
+  release.resolve();
+  await Promise.all([capturing, closing]);
+  const id = app.useApp.getState().activeWorkspaceId!;
+  expect(app.useApp.getState().sessions[id]?.primary).toBe("Inbox/Untitled.md");
+});
+
+it("finishes an accepted capture registration before removal without reopening its admission gate", async () => {
+  const app = await import("./app-store");
+  const { files } = await import("../platform");
+  const { quickCapture } = await import("../knowledge/templates");
+  await app.initialize();
+  await quickCapture();
+  const id = app.useApp.getState().activeWorkspaceId!;
+  const ensure = files.ensureCaptureWorkspace.bind(files);
+  const started = barrier(),
+    release = barrier();
+  vi.spyOn(files, "ensureCaptureWorkspace").mockImplementationOnce(async () => {
+    started.resolve();
+    await release.promise;
+    return ensure();
+  });
+  const capturing = quickCapture();
+  await started.promise;
+  const removing = app.removeWorkspace(id);
+  const late = app.newNote(id).then(
+    () => "created",
+    () => "rejected",
+  );
+  release.resolve();
+  await Promise.all([capturing, removing]);
+  expect(await late).toBe("rejected");
+  expect(
+    app.useApp.getState().workspaces.some((workspace) => workspace.id === id),
+  ).toBe(false);
+  expect(app.peekDocument(id, "Inbox/Untitled 2.md")).toBeUndefined();
+  expect((await files.readNote(id, "Inbox/Untitled 2.md")).content).toBe("");
+});
+
+it("queues capture requested during removal until unregistering finishes", async () => {
+  const app = await import("./app-store");
+  const { files } = await import("../platform");
+  const { quickCapture } = await import("../knowledge/templates");
+  await app.initialize();
+  await quickCapture();
+  const id = app.useApp.getState().activeWorkspaceId!;
+  const remove = files.removeWorkspace.bind(files);
+  const started = barrier(),
+    release = barrier();
+  vi.spyOn(files, "removeWorkspace").mockImplementationOnce(async (...args) => {
+    started.resolve();
+    await release.promise;
+    return remove(...args);
+  });
+  const removing = app.removeWorkspace(id);
+  await started.promise;
+  const capturing = quickCapture();
+  release.resolve();
+  await Promise.all([removing, capturing]);
+  expect(
+    app.useApp.getState().workspaces.some((workspace) => workspace.id === id),
+  ).toBe(true);
+  expect(app.currentSession().primary).toBe("Inbox/Untitled 2.md");
+  const reopened = await app.loadDocument(id, "Inbox/Untitled 2.md");
+  expect(reopened.getSnapshot().editable).toBe(true);
+});
+
+it("waits for admitted folder creation before removing its workspace", async () => {
+  const app = await import("./app-store");
+  const { files } = await import("../platform");
+  await app.initialize();
+  const create = files.createFolder.bind(files);
+  const started = barrier(),
+    release = barrier();
+  vi.spyOn(files, "createFolder").mockImplementationOnce(async (...args) => {
+    started.resolve();
+    await release.promise;
+    return create(...args);
+  });
+  const creating = app.createFolder("algebra", "", "Accepted folder");
+  await started.promise;
+  const removing = app.removeWorkspace("algebra");
+  release.resolve();
+  await Promise.all([creating, removing]);
+  expect(app.useApp.getState().entries.algebra).toBeUndefined();
+  expect(
+    app.useApp
+      .getState()
+      .workspaces.some((workspace) => workspace.id === "algebra"),
+  ).toBe(false);
+});
+
+it("includes pending workspace registration in shutdown and activates primary focus", async () => {
+  const app = await import("./app-store");
+  const { files } = await import("../platform");
+  await app.initialize();
+  app.openFile("algebra", "Lectures/Eigenvalues.md", "secondary");
+  const started = barrier(),
+    release = barrier();
+  // Browser folder selection is unsupported; retain actual demo registration behind it.
+  vi.spyOn(files, "addWorkspace").mockImplementationOnce(async () => {
+    started.resolve();
+    await release.promise;
+    return files.ensureCaptureWorkspace();
+  });
+  const adding = app.addWorkspace("/temporary/new-workspace");
+  await started.promise;
+  let finished = false;
+  const closing = app.flushAll().then(() => {
+    finished = true;
+  });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(finished).toBe(false);
+  release.resolve();
+  await Promise.all([adding, closing]);
+  expect(app.useApp.getState().focusedPane).toBe("primary");
+  expect(
+    app.useApp
+      .getState()
+      .workspaces.find(
+        (workspace) => workspace.id === app.useApp.getState().activeWorkspaceId,
+      )?.name,
+  ).toBe("Quick Notes");
+});
+
+it("waits for an earlier requested load before closing and disposing its buffer", async () => {
+  const app = await import("./app-store");
+  const { files } = await import("../platform");
+  await app.initialize();
+  app.openFile("algebra", "Practice problems.md");
+  const read = files.readNote.bind(files);
+  const started = barrier(),
+    release = barrier();
+  vi.spyOn(files, "readNote").mockImplementationOnce(async (...args) => {
+    started.resolve();
+    await release.promise;
+    return read(...args);
+  });
+  const loading = app.loadDocument("algebra", "Practice problems.md");
+  let finished = false;
+  const closing = app.closeFile("algebra", "Practice problems.md").then(() => {
+    finished = true;
+  });
+  await started.promise;
+  await vi.advanceTimersByTimeAsync(0);
+  expect(finished).toBe(false);
+  release.resolve();
+  const document = await loading;
+  await closing;
+  expect(document.getSnapshot().editable).toBe(false);
+  expect(app.peekDocument("algebra", "Practice problems.md")).toBeUndefined();
+});
+
 it("waits for an accepted folder move before saving for close", async () => {
   const app = await import("./app-store");
   const { files } = await import("../platform");
@@ -561,6 +884,42 @@ it("releases a closed saved document and reloads its current disk contents on re
   expect(reopened.content).toBe("# Edited elsewhere");
 });
 
+it("rejects a stale rename after close without changing the disk file", async () => {
+  const app = await import("./app-store");
+  const { files } = await import("../platform");
+  await app.initialize();
+  const document = await app.loadDocument("algebra", "Practice problems.md");
+  await app.closeFile("algebra", "Practice problems.md");
+  await expect(app.renameNote(document, "Retired.md")).rejects.toThrow();
+  expect(
+    (await files.readNote("algebra", "Practice problems.md")).content,
+  ).toBe(document.content);
+  expect(app.peekDocument("algebra", "Retired.md")).toBeUndefined();
+});
+
+it("rejects a new load admitted after close begins instead of registering it after retirement", async () => {
+  const app = await import("./app-store");
+  const { files } = await import("../platform");
+  await app.initialize();
+  app.openFile("algebra", "Practice problems.md");
+  const read = files.readNote.bind(files);
+  const release = barrier();
+  vi.spyOn(files, "readNote").mockImplementationOnce(async (...args) => {
+    await release.promise;
+    return read(...args);
+  });
+  const closing = app.closeFile("algebra", "Practice problems.md");
+  const loading = app.loadDocument("algebra", "Practice problems.md");
+  const outcome = loading.then(
+    () => "loaded",
+    () => "rejected",
+  );
+  release.resolve();
+  await closing;
+  expect(await outcome).toBe("rejected");
+  expect(app.peekDocument("algebra", "Practice problems.md")).toBeUndefined();
+});
+
 it("applies preferences only after successful persistence and can disable session restore", async () => {
   const app = await import("./app-store");
   const { files } = await import("../platform");
@@ -590,4 +949,168 @@ it("coalesces concurrent refreshes and preserves the file index when nothing cha
   ]);
   expect(scan).toHaveBeenCalledTimes(1);
   expect(app.useApp.getState().entries.algebra).toBe(entries);
+});
+
+it("ignores a refresh read that finishes after workspace removal", async () => {
+  const app = await import("./app-store");
+  const { files } = await import("../platform");
+  await app.initialize();
+  const document = await app.loadDocument("algebra", "Practice problems.md");
+  const content = document.content;
+  const read = files.readNote.bind(files);
+  const started = barrier(),
+    release = barrier();
+  vi.spyOn(files, "readNote").mockImplementationOnce(async (...args) => {
+    const note = await read(...args);
+    started.resolve();
+    await release.promise;
+    return { ...note, content: "# Stale refresh", revision: "external" };
+  });
+  const refreshing = app.refreshWorkspace("algebra");
+  await started.promise;
+  await app.removeWorkspace("algebra");
+  expect(app.useApp.getState().entries.algebra).toBeUndefined();
+  release.resolve();
+  await refreshing;
+  expect(app.useApp.getState().entries.algebra).toBeUndefined();
+  expect(document.content).toBe(content);
+});
+
+it("does not feed a closed document with a pending refresh result", async () => {
+  const app = await import("./app-store");
+  const { files } = await import("../platform");
+  await app.initialize();
+  const document = await app.loadDocument("algebra", "Practice problems.md");
+  const content = document.content;
+  const read = files.readNote.bind(files);
+  const started = barrier(),
+    release = barrier();
+  vi.spyOn(files, "readNote").mockImplementationOnce(async (...args) => {
+    const note = await read(...args);
+    started.resolve();
+    await release.promise;
+    return { ...note, content: "# Stale refresh", revision: "external" };
+  });
+  const refreshing = app.refreshWorkspace("algebra");
+  await started.promise;
+  await app.closeFile("algebra", "Practice problems.md");
+  release.resolve();
+  await refreshing;
+  expect(document.content).toBe(content);
+  expect(document.getSnapshot().editable).toBe(false);
+  expect(app.peekDocument("algebra", "Practice problems.md")).toBeUndefined();
+});
+
+it("keeps a reopened workspace index when an earlier registration refresh finishes", async () => {
+  const app = await import("./app-store");
+  const { files } = await import("../platform");
+  await app.initialize();
+  const previous = await files.scanWorkspace("algebra");
+  const freshEntries = [
+    {
+      path: "Fresh.md",
+      title: "Fresh",
+      tags: [],
+      kind: "note" as const,
+      modified: 1,
+    },
+  ];
+  const scan = files.scanWorkspace.bind(files);
+  const started = barrier(),
+    release = barrier();
+  vi.spyOn(files, "scanWorkspace").mockImplementationOnce(async (...args) => {
+    const snapshot = await scan(...args);
+    started.resolve();
+    await release.promise;
+    return snapshot;
+  });
+  const refreshing = app.refreshWorkspace("algebra");
+  await started.promise;
+  await app.removeWorkspace("algebra");
+  vi.spyOn(files, "addWorkspace").mockResolvedValueOnce({
+    workspace: previous.workspace,
+    entries: freshEntries,
+  });
+  await app.addWorkspace(previous.workspace.path);
+  release.resolve();
+  await refreshing;
+  expect(app.useApp.getState().entries.algebra).toEqual(freshEntries);
+});
+
+it("waits for an admitted drawing export before shutdown saves its preview link", async () => {
+  const app = await import("./app-store");
+  const { files } = await import("../platform");
+  const { DrawingBinding } = await import("../drawing/storage");
+  const { drawingPreviewLink } = await import("../drawing/preview-link");
+  await app.initialize();
+  const document = await app.loadDocument("algebra", "Practice problems.md");
+  const binding = new DrawingBinding(document.content);
+  const write = files.writeDrawingSvg.bind(files);
+  const started = barrier(),
+    release = barrier();
+  vi.spyOn(files, "writeDrawingSvg").mockImplementationOnce(async (...args) => {
+    started.resolve();
+    await release.promise;
+    return write(...args);
+  });
+  const exporting = app.withWorkspaceDocuments("algebra", async () => {
+    const path = await files.writeDrawingSvg(
+      "algebra",
+      '<svg xmlns="http://www.w3.org/2000/svg"/>',
+    );
+    document.edit(
+      binding.update(
+        document.content,
+        [],
+        drawingPreviewLink(document.file.path, path),
+      ),
+    );
+    await document.flush();
+  });
+  await started.promise;
+  expect(app.hasUnsavedChanges()).toBe(true);
+  let finished = false;
+  const closing = app.flushAll().then(() => {
+    finished = true;
+  });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(finished).toBe(false);
+  release.resolve();
+  await Promise.all([exporting, closing]);
+  expect(
+    (await files.readNote("algebra", document.file.path)).content,
+  ).toContain('"notes-drawing-preview"');
+  expect(document.dirty).toBe(false);
+  expect(finished).toBe(true);
+});
+
+it("refreshes a new registration without joining the removed registration's pending scan", async () => {
+  const app = await import("./app-store");
+  const { files } = await import("../platform");
+  await app.initialize();
+  const previous = await files.scanWorkspace("algebra");
+  const scan = files.scanWorkspace.bind(files);
+  const started = barrier(),
+    release = barrier();
+  vi.spyOn(files, "scanWorkspace").mockImplementationOnce(async (...args) => {
+    const snapshot = await scan(...args);
+    started.resolve();
+    await release.promise;
+    return snapshot;
+  });
+  const oldRefresh = app.refreshWorkspace("algebra");
+  await started.promise;
+  await app.removeWorkspace("algebra");
+  vi.spyOn(files, "addWorkspace").mockResolvedValueOnce(previous);
+  await app.addWorkspace(previous.workspace.path);
+  vi.mocked(files.scanWorkspace).mockResolvedValueOnce(previous);
+  let finished = false;
+  const freshRefresh = app.refreshWorkspace("algebra").then(() => {
+    finished = true;
+  });
+  await vi.advanceTimersByTimeAsync(0);
+  const completedBeforeOldRead = finished;
+  release.resolve();
+  await Promise.all([oldRefresh, freshRefresh]);
+  expect(completedBeforeOldRead).toBe(true);
 });

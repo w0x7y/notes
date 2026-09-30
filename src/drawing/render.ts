@@ -1,6 +1,10 @@
 import { bounds, sceneBounds, type Shape, type Viewport } from "./model";
 
 const FONT = '"Adwaita Sans", "DejaVu Sans", sans-serif';
+
+export function drawingSelectionColor(canvas: HTMLCanvasElement): string {
+  return getComputedStyle(canvas).getPropertyValue("--accent").trim();
+}
 function arrowHead(s: Extract<Shape, { kind: "arrow" }>) {
   const angle = Math.atan2(s.h, s.w),
     size = Math.max(12, s.stroke * 4);
@@ -103,6 +107,7 @@ export function renderCanvas(
   shapes: readonly Shape[],
   view: Viewport,
   selected: string | null = null,
+  selectionColor?: string,
 ) {
   const width = canvas.clientWidth,
     height = canvas.clientHeight;
@@ -137,12 +142,13 @@ export function renderCanvas(
     const b = bounds(chosen),
       pad = 5 / view.zoom,
       handle = 8 / view.zoom;
-    ctx.strokeStyle = "#61afef";
+    const color = selectionColor ?? drawingSelectionColor(canvas);
+    ctx.strokeStyle = color;
     ctx.lineWidth = 1 / view.zoom;
     ctx.setLineDash([4 / view.zoom, 3 / view.zoom]);
     ctx.strokeRect(b.x - pad, b.y - pad, b.w + pad * 2, b.h + pad * 2);
     ctx.setLineDash([]);
-    ctx.fillStyle = "#61afef";
+    ctx.fillStyle = color;
     ctx.fillRect(
       b.x + b.w - handle / 2,
       b.y + b.h - handle / 2,

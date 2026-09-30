@@ -4,6 +4,14 @@ Ctrl+P searches note titles and inline tags. Ctrl+Shift+P searches note contents
 
 The ellipsis beside the workspace name opens Tools, with named actions, shortcuts and workspace settings. Ctrl+K opens the command palette. It includes search, capture, daily notes, lecture/template creation, tasks, assignments/projects, settings, refresh, save, and pane actions.
 
+Keyboard shortcuts, the command palette, Tools, and sidebar Capture/Today use the same command definitions and availability rules. Busy dialogs block commands; an open drawing allows Save. Executing an action commits a focused property draft before changing the view.
+
+Workspace sessions own tab placement and pane focus. Opening an already visible note focuses that pane; cycling clears a previous heading jump. Turning off a split with only a secondary note promotes it into the single pane. Restored layouts repair duplicate tabs and duplicate visible panes while keeping intentional empty panes.
+
+Document lifetime tracks accepted loads and file workflows through completion. Workspace removal first stops accepting new work for that registration, then waits for accepted work and saves the latest buffers before unregistering it. Closing, deleting, and removing briefly hold editing during their final commit. Failed saves or removal restore editing and retain the buffer and registration. App shutdown waits for accepted creation and retirement work as well as save queues. Workspace removal leaves the directory and its files intact.
+
+Focus refresh results apply only to the workspace registration that started them and to documents still registered when reads complete. Removing and reopening the same workspace cannot restore its old scan or update a closed buffer; a reopened workspace starts a fresh refresh.
+
 Ctrl+Shift+N creates a blank note in Inbox/ inside the dedicated Quick Notes workspace. Ctrl+Shift+D opens Daily/YYYY-MM-DD.md in that same workspace, using the local calendar date. The native app creates Documents/Quick Notes on first use, using the OS Documents location. Repeating the daily command reopens the existing file without replacing its content. Removing Quick Notes unregisters it like any workspace; invoking capture/daily again registers the existing directory.
 
 ## Templates
@@ -14,7 +22,7 @@ The template picker seeds ordinary Markdown files in Templates/: Lecture, Assign
 
 Type [[ for note suggestions, then use arrows and Enter. Suggestions include registered workspaces; generated links qualify their target to avoid ambiguous filenames. Type # within a link for that note's headings. Clicking a heading link navigates to the heading's source line. Same-note links such as [[#Examples]] work too.
 
-The panel button beside Drawing opens the outline, properties and backlinks. The outline follows unsaved edits, including edits that leave the title unchanged. Backlinks list other notes linking to the current note. The pin button adds the note to the sidebar's Pinned list. Pins follow app-driven renames and folder moves. Pins and saved searches are stored in the app's local WebView storage, outside note files; clearing app site data removes them.
+The Toggle note details button beside the pin button opens the outline, properties and backlinks. In narrow panes, details overlay the writing area; Close note details restores it. The outline follows unsaved edits, including edits that leave the title unchanged. Backlinks list other notes linking to the current note. The pin button adds the note to the sidebar's Pinned list. Pins follow app-driven renames and folder moves. Pins and saved searches are stored in the app's local WebView storage, outside note files; clearing app site data removes them.
 
 Type / at the start of a line for Markdown insertions: headings, checklist, list, table, fenced code and quote. Menus do not appear inside code blocks.
 
@@ -22,7 +30,7 @@ Type / at the start of a line for Markdown insertions: headings, checklist, list
 
 Tools → Note graph or Ctrl+K → Open note graph opens a circular hierarchical edge-bundling view. The graph loads on demand and reads content through the existing analysis cache. Workspaces and nested folders determine the hierarchy; lines represent resolvable wiki links and internal Markdown links. Repeated links to a note share one directed edge, and same-note heading links do not create loops. Images and external URLs are excluded. Missing/ambiguous note targets are counted as unresolved links; failed reads show an incomplete-connections warning while their notes remain visible.
 
-Choose the current workspace or all workspaces. Search titles, paths, and workspace names without changing note positions or reading files again. Select a node or note in the list to inspect its connections. Blue links go out of the selected note and green links come in. Incoming/outgoing rows open their source/target note. Double-click a graph node or use Open note to navigate; Enter on a focused node also opens it. Search supports Arrow Down to reach the note list, whose arrow keys select adjacent notes. Escape closes the graph.
+Choose the current workspace or all workspaces. Search titles, paths, and workspace names without changing note positions or reading files again. Select a node or note in the list to inspect its connections. Accent-colored links go out of the selected note and success-colored links come in. Incoming/outgoing rows open their source/target note. Double-click a graph node or use Open note to navigate; Enter on a focused node also opens it. Search supports Arrow Down to reach the note list, whose arrow keys select adjacent notes. Escape closes the graph.
 
 Use zoom controls and drag the background to pan; Reset graph view restores the initial framing. Large collections hide most labels until selection or zooming. Workspace colors identify the groups; hover a group arc for its workspace/folder name.
 
@@ -53,3 +61,9 @@ Browser checks exercised search filters/highlights/saved searches, task changes 
 Historical workflow checks on 2026-09-29: 78 frontend tests passed, one existing opt-in performance test skipped; 55 native tests passed; TypeScript, strict Clippy and the native release build passed. The final drawing export browser check was interrupted when the collaborative preview disconnected. SVG export and drawing source/fallback round trips passed automated tests.
 
 Architecture checks on 2026-09-30 add regressions for concurrent and cancelled consumers, stale completion, failed-read retry, removal/reopen freshness, scoped live outlines and yielding during bulk live-buffer analysis. Relocation tests cover typing during moves, queued moves/creation, close ordering, pins and navigation, committed follow-up failures, and unreadable destination buffers. Native tests cover multi-target final rewrites, links between moved descendants, overlapping roots and partial read/write failures. Current command results are in the [README validation section](../README.md#validation).
+
+## Interface updates, 2026-09-30
+
+Capture and Today are available directly in the sidebar as well as through their existing keyboard shortcuts and commands. Note headers group Edit/Read, pinning, and details controls; More note actions contains drawing, formatting toolbar, and rename actions. Search and commands share the folded-page bookmark selection mark. Note details group outline, backlinks, and properties in one companion panel. These presentation changes use the same workflow handlers and save queues.
+
+Settings → Appearance selects one of six themes; Graphite + amber is the default. Draft theme previews remain in settings until Save changes. Theme changes update mounted editors through CSS variables without replacing their document, selection, or undo history. Native preference tests verify theme persistence after restart with temporary files.

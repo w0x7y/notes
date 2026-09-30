@@ -25,6 +25,7 @@ const DrawingPreview = lazy(() =>
 type Props = {
   document: NoteDocument;
   externalVersion: number;
+  editable: boolean;
   editorRef: RefObject<EditorHandle | null>;
   onLink: (target: string) => void;
   onDrawing: (source: string) => void;
@@ -33,6 +34,7 @@ type Props = {
 export const LivePreview = memo(function LivePreview({
   document,
   externalVersion,
+  editable,
   editorRef,
   onLink,
   onDrawing,
@@ -118,6 +120,8 @@ export const LivePreview = memo(function LivePreview({
             <CodeEditor
               ref={editorRef}
               value={block.source}
+              editable={editable}
+              canEdit={() => document.getSnapshot().editable}
               note={{
                 workspaceId: document.workspaceId,
                 path: document.getSnapshot().path,
@@ -142,7 +146,7 @@ export const LivePreview = memo(function LivePreview({
             tabIndex={0}
             aria-label="Edit this Markdown block"
             onKeyDown={(event) => {
-              if (event.key === "Enter") {
+              if (event.key === "Enter" && document.getSnapshot().editable) {
                 event.preventDefault();
                 setActive(index);
               }
@@ -160,7 +164,7 @@ export const LivePreview = memo(function LivePreview({
                   return;
                 }
               }
-              setActive(index);
+              if (document.getSnapshot().editable) setActive(index);
             }}
             dangerouslySetInnerHTML={{
               __html: block.html,

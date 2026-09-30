@@ -25,6 +25,7 @@ import type { NoteDocument } from "../domain/document";
 import { Dialog } from "../components/Dialog";
 import { copyText, files } from "../platform";
 import { errorMessage } from "../domain/notes";
+import { withWorkspaceDocuments } from "../domain/app-store";
 import { DrawingBinding } from "./storage";
 import { sceneSchema, type Shape, type Tool } from "./model";
 import { DrawingController } from "./controller";
@@ -166,18 +167,20 @@ function DrawingEditor({
     setExporting(true);
     try {
       const shapes = controller.current.history.shapes;
-      const path = await files.writeDrawingSvg(
-        document.workspaceId,
-        exportSvg(shapes),
-      );
-      document.edit(
-        binding.update(
-          document.content,
-          shapes,
-          drawingPreviewLink(document.file.path, path),
-        ),
-      );
-      await document.flush();
+      await withWorkspaceDocuments(document.workspaceId, async () => {
+        const path = await files.writeDrawingSvg(
+          document.workspaceId,
+          exportSvg(shapes),
+        );
+        document.edit(
+          binding.update(
+            document.content,
+            shapes,
+            drawingPreviewLink(document.file.path, path),
+          ),
+        );
+        await document.flush();
+      });
       setError(null);
       setNotice("SVG preview saved");
       if (closeAfter) onClose();
@@ -203,7 +206,13 @@ function DrawingEditor({
     }
   }
   return (
-    <Dialog title="Drawing" className="drawing-dialog" onClose={close}>
+    <Dialog
+      title="Drawing"
+      className="drawing-dialog"
+      onClose={close}
+      busy={exporting}
+      dismissible={!exporting}
+    >
       <div
         className="drawing-shell"
         inert={exporting}
@@ -393,7 +402,7 @@ function DrawingEditor({
         )}
         <div className="drawing-footer">
           <span id="drawing-help">
-            Space + drag to pan · Ctrl + scroll to zoom · drag the blue handle
+            Space + drag to pan · Ctrl + scroll to zoom · drag the corner handle
             to resize · double-click text to edit
           </span>
           <span className="flex-1" />

@@ -4,6 +4,7 @@ import { errorMessage, splitNote } from "./notes";
 export type SaveStatus =
   { kind: "saved" } | { kind: "saving" } | { kind: "failed"; message: string };
 type DocumentSnapshot = {
+  editable: boolean;
   path: string;
   title: string;
   status: SaveStatus;
@@ -25,6 +26,8 @@ export class NoteDocument {
   private timer: ReturnType<typeof setTimeout> | undefined;
   private pending: Promise<void> | null = null;
   private held: Promise<void> | null = null;
+  private disposed = false;
+  private editHolds = 0;
 
   constructor(
     readonly workspaceId: string,
@@ -41,6 +44,7 @@ export class NoteDocument {
     this.content = this.savedContent = note.content;
     this.revision = note.revision;
     this.snapshot = {
+      editable: true,
       path: note.path,
       title: splitNote(note.content).title,
       status: { kind: "saved" },
@@ -89,6 +93,10 @@ export class NoteDocument {
 
   edit(content: string): void {
     if (content === this.content) return;
+    if (!this.snapshot.editable)
+      throw new Error(
+        "This note is being closed or removed. Wait for the operation to finish.",
+      );
     this.content = content;
     const title = splitNote(content).title;
     if (this.snapshot.status.kind !== "saving" || title !== this.snapshot.title)
@@ -108,6 +116,10 @@ export class NoteDocument {
   }
 
   flush(): Promise<void> {
+    if (this.disposed)
+      return Promise.reject(
+        new Error("This note is closed. Reopen it before saving."),
+      );
     clearTimeout(this.timer);
     if (this.held) return this.held.then(() => this.flush());
     if (this.pending) return this.pending;
@@ -154,10 +166,20 @@ export class NoteDocument {
   }
 
   rename(renameFile: (note: NoteFile) => Promise<SaveResult>): Promise<void> {
+    if (!this.snapshot.editable)
+      return Promise.reject(
+        new Error(
+          "This note is being closed or removed. Reopen it before renaming.",
+        ),
+      );
     clearTimeout(this.timer);
     if (this.held) return this.held.then(() => this.rename(renameFile));
     const operation = (this.pending ?? Promise.resolve())
       .then(async () => {
+        if (!this.snapshot.editable)
+          throw new Error(
+            "This note is being closed or removed. Reopen it before renaming.",
+          );
         await this.drain();
         const payload = this.file;
         this.publish({ status: { kind: "saving" } });
@@ -227,7 +249,23 @@ export class NoteDocument {
     });
   }
 
+  /** Only the final retirement commit pauses input; saves and moves keep typing enabled. */
+  holdEdits(): () => void {
+    this.editHolds++;
+    this.publish({ editable: false });
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.editHolds--;
+      if (!this.disposed && this.editHolds === 0)
+        this.publish({ editable: true });
+    };
+  }
+
   dispose(): void {
+    this.disposed = true;
+    this.publish({ editable: false });
     clearTimeout(this.timer);
     this.listeners.clear();
     this.contentListeners.clear();

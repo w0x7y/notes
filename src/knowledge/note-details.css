@@ -1,4 +1,5 @@
 .note-workarea {
+  position: relative;
   display: flex;
   flex: 1;
   min-height: 0;
@@ -13,7 +14,7 @@
   flex: none;
   overflow: auto;
   border-inline-start: 1px solid var(--border);
-  background: var(--sidebar, #21252b);
+  background: var(--sidebar);
   font-size: 12px;
 }
 .note-details-header {
@@ -59,5 +60,5 @@
 }
 .note-workarea .view-button[aria-pressed="true"],
 .view-controls .view-button[aria-pressed="true"] {
-  color: var(--blue, #61afef);
+  color: var(--accent);
 }

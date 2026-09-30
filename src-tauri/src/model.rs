@@ -107,9 +107,21 @@ pub enum SortFilesBy {
     Modified,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Theme {
+    GraphiteAmber,
+    InkJade,
+    MidnightIce,
+    CharcoalCoral,
+    ForestMoss,
+    OneDarkPro,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Preferences {
+    pub theme: Theme,
     pub font_size: u8,
     pub line_height: f64,
     pub editor_font: EditorFont,
@@ -136,6 +148,7 @@ pub struct Preferences {
 impl Default for Preferences {
     fn default() -> Self {
         Self {
+            theme: Theme::GraphiteAmber,
             font_size: 15,
             line_height: 1.9,
             editor_font: EditorFont::Mono,

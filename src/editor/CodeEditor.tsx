@@ -1,5 +1,10 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
-import { Compartment, EditorState, type Extension } from "@codemirror/state";
+import {
+  Annotation,
+  Compartment,
+  EditorState,
+  type Extension,
+} from "@codemirror/state";
 import {
   Decoration,
   EditorView,
@@ -20,7 +25,7 @@ import { searchEntries } from "../domain/app-store";
 import { bracketMatching, syntaxTree } from "@codemirror/language";
 import { markdown } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
-import { oneDark } from "@codemirror/theme-one-dark";
+import { editorTheme } from "./theme";
 import { useShallow } from "zustand/react/shallow";
 import { useApp } from "../domain/app-store";
 import {
@@ -45,6 +50,7 @@ export type EditorHandle = {
   focus: () => void;
   jumpTo: (offset: number) => void;
 };
+const synchronizeValue = Annotation.define<boolean>();
 
 const direction = ViewPlugin.fromClass(
   class {
@@ -153,12 +159,15 @@ type Props = {
   autofocus?: boolean;
   label?: string;
   note?: { workspaceId: string; path: string };
+  editable?: boolean;
+  canEdit?: () => boolean;
 };
 
 export const CodeEditor = forwardRef<EditorHandle, Props>(
   function CodeEditor(props, ref) {
     const preferences = useApp(useShallow(selectEditorPreferences));
     const settings = useRef(new Compartment());
+    const editability = useRef(new Compartment());
     const initialPreferences = useRef(preferences);
     const host = useRef<HTMLDivElement>(null);
     const editor = useRef<EditorView | null>(null);
@@ -192,7 +201,7 @@ export const CodeEditor = forwardRef<EditorHandle, Props>(
         history(),
         bracketMatching(),
         markdown({ codeLanguages: languages }),
-        oneDark,
+        editorTheme,
         autocompletion({
           override: [
             noteCompletions(() => {
@@ -215,33 +224,21 @@ export const CodeEditor = forwardRef<EditorHandle, Props>(
         settings.current.of(
           editorPreferenceExtensions(initialPreferences.current),
         ),
+        editability.current.of([
+          EditorState.readOnly.of(initial.editable === false),
+          EditorView.editable.of(initial.editable !== false),
+        ]),
+        EditorState.transactionFilter.of((transaction) =>
+          transaction.docChanged &&
+          !transaction.annotation(synchronizeValue) &&
+          handlers.current.canEdit?.() === false
+            ? []
+            : transaction,
+        ),
         EditorView.perLineTextDirection.of(true),
         direction,
         EditorView.contentAttributes.of({
           "aria-label": initial.label ?? "Markdown editor",
-        }),
-        EditorView.theme({
-          "&": { backgroundColor: "transparent" },
-          ".cm-content": {
-            padding: "0",
-            caretColor: "#61afef",
-          },
-          ".cm-line": { padding: "0" },
-          ".cm-scroller": {
-            overflow: "visible",
-          },
-          "&.cm-focused": { outline: "none" },
-          ".cm-tooltip-autocomplete": {
-            background: "#21252b",
-            border: "1px solid #3e4451",
-            fontFamily: "var(--font-ui)",
-            fontSize: "13px",
-          },
-          ".cm-tooltip-autocomplete ul li[aria-selected]": {
-            background: "#2c313a",
-            color: "#abb2bf",
-          },
-          ".cm-completionDetail": { color: "#828997", marginLeft: "12px" },
         }),
         keymap.of([
           ...completionKeymap,
@@ -264,7 +261,12 @@ export const CodeEditor = forwardRef<EditorHandle, Props>(
           indentWithTab,
         ]),
         EditorView.updateListener.of((update) => {
-          if (update.docChanged)
+          if (
+            update.docChanged &&
+            !update.transactions.some((transaction) =>
+              transaction.annotation(synchronizeValue),
+            )
+          )
             handlers.current.onChange(update.state.doc.toString());
           if (update.selectionSet)
             handlers.current.onSelection?.(
@@ -325,6 +327,15 @@ export const CodeEditor = forwardRef<EditorHandle, Props>(
 
     useEffect(() => {
       editor.current?.dispatch({
+        effects: editability.current.reconfigure([
+          EditorState.readOnly.of(props.editable === false),
+          EditorView.editable.of(props.editable !== false),
+        ]),
+      });
+    }, [props.editable]);
+
+    useEffect(() => {
+      editor.current?.dispatch({
         effects: settings.current.reconfigure(
           editorPreferenceExtensions(preferences),
         ),
@@ -340,6 +351,7 @@ export const CodeEditor = forwardRef<EditorHandle, Props>(
         );
         view.dispatch({
           changes: { from: 0, to: view.state.doc.length, insert: props.value },
+          annotations: synchronizeValue.of(true),
           selection: { anchor: position },
         });
       }

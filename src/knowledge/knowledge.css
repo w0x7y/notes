@@ -19,7 +19,7 @@
   padding: 8px 10px;
   max-height: 160px;
   overflow: auto;
-  border-bottom: 1px solid #303640;
+  border-bottom: 1px solid var(--border);
 }
 .favorite-notes > div:not(.section-name) {
   display: flex;
@@ -39,11 +39,11 @@
   text-overflow: ellipsis;
 }
 .favorite-note svg {
-  color: #e5c07b;
+  color: var(--warning);
   flex-shrink: 0;
 }
 .unpin {
-  color: #7f8796;
+  color: var(--muted);
   padding: 0 5px;
 }
 .template-dialog {
@@ -61,11 +61,11 @@
 .knowledge-form input:not([type="radio"]),
 .content-filters input,
 .save-search input {
-  background: #21252b;
-  border: 1px solid #3a414d;
+  background: var(--sidebar);
+  border: 1px solid var(--border-strong);
   border-radius: 4px;
   padding: 7px 9px;
-  color: #abb2bf;
+  color: var(--text);
   min-width: 0;
   font: inherit;
 }
@@ -79,12 +79,12 @@
   align-items: center;
   gap: 6px;
   padding: 9px;
-  border: 1px solid #3a414d;
+  border: 1px solid var(--border-strong);
   border-radius: 4px;
 }
 .template-options label:has(:checked) {
-  border-color: #61afef;
-  color: #61afef;
+  border-color: var(--accent);
+  color: var(--accent);
 }
 .content-search-dialog {
   width: min(820px, 94vw);
@@ -94,7 +94,7 @@
   display: flex;
   align-items: end;
   gap: 10px;
-  border-bottom: 1px solid #303640;
+  border-bottom: 1px solid var(--border);
 }
 .content-filters label {
   display: grid;
@@ -102,7 +102,7 @@
   min-width: 0;
   flex: 1;
   font-size: 11px;
-  color: #9da5b4;
+  color: var(--muted);
 }
 .content-filters input {
   width: 100%;
@@ -115,19 +115,19 @@
   gap: 5px;
 }
 .content-result small {
-  color: #7f8796;
+  color: var(--muted);
   font-size: 11px;
 }
 .result-snippet {
   font-size: 12px;
   white-space: normal;
   overflow-wrap: anywhere;
-  color: #abb2bf;
+  color: var(--text);
   text-align: start;
 }
 .result-snippet mark {
-  background: #e5c07b26;
-  color: #e5c07b;
+  background: var(--accent-soft);
+  color: var(--accent);
   border-radius: 2px;
 }
 .saved-searches {
@@ -138,7 +138,7 @@
 }
 .saved-searches > span {
   display: flex;
-  background: #2c313a;
+  background: var(--hover);
   border-radius: 4px;
 }
 .saved-searches button {
@@ -146,7 +146,7 @@
   font-size: 11px;
 }
 .saved-searches button:hover {
-  color: #61afef;
+  color: var(--accent);
 }
 .save-search {
   display: flex;
@@ -160,7 +160,7 @@
 }
 .index-errors {
   padding: 8px 16px;
-  color: #e5c07b;
+  color: var(--warning);
   font-size: 12px;
   max-height: 110px;
   overflow: auto;

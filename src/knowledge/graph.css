@@ -9,13 +9,13 @@
   align-items: center;
   gap: 10px;
   padding: 12px 15px;
-  border-bottom: 1px solid #3e4452;
+  border-bottom: 1px solid var(--border-strong);
 }
 .graph-toolbar input {
   min-width: 100px;
   flex: 1;
   background: var(--sidebar);
-  border: 1px solid #3e4452;
+  border: 1px solid var(--border-strong);
   border-radius: 3px;
   padding: 7px 9px;
 }
@@ -46,7 +46,7 @@
 }
 .graph-warning {
   padding: 7px 15px;
-  color: var(--yellow);
+  color: var(--warning);
   font-size: 12px;
   background: var(--sidebar);
   max-height: 70px;
@@ -57,7 +57,7 @@
   grid-template-columns: minmax(0, 1fr) 245px;
   height: min(620px, 65vh);
   min-height: 280px;
-  border-top: 1px solid #3e4452;
+  border-top: 1px solid var(--border-strong);
 }
 .graph-canvas {
   position: relative;
@@ -77,17 +77,17 @@
   cursor: grabbing;
 }
 .graph-edges path {
-  stroke: #7c889b;
+  stroke: var(--muted);
   stroke-width: 1;
   fill: none;
   pointer-events: none;
 }
 .graph-edges path.is-outgoing {
-  stroke: var(--blue);
+  stroke: var(--accent);
   stroke-width: 1.7;
 }
 .graph-edges path.is-incoming {
-  stroke: var(--green);
+  stroke: var(--success);
   stroke-width: 1.7;
 }
 .graph-node {
@@ -107,8 +107,8 @@
 }
 .graph-node.is-selected .graph-node-halo,
 .graph-node:focus-visible .graph-node-halo {
-  fill: #34455b;
-  stroke: var(--blue);
+  fill: var(--accent-soft);
+  stroke: var(--accent);
 }
 .graph-node.is-selected text,
 .graph-node:focus-visible text,
@@ -123,7 +123,7 @@
   align-items: center;
   gap: 3px;
   background: var(--editor);
-  border: 1px solid #3e4452;
+  border: 1px solid var(--border-strong);
   border-radius: 4px;
   padding: 3px;
   z-index: 1;
@@ -147,15 +147,15 @@
   pointer-events: none;
 }
 .graph-outgoing {
-  color: var(--blue);
+  color: var(--accent);
 }
 .graph-incoming {
-  color: var(--green);
+  color: var(--success);
 }
 .graph-details {
   min-width: 0;
   overflow: auto;
-  border-left: 1px solid #3e4452;
+  border-left: 1px solid var(--border-strong);
   padding: 14px 10px;
 }
 .graph-details h3,
@@ -198,13 +198,13 @@
   color: var(--muted);
 }
 .graph-note-item.is-selected {
-  background: #303b4b;
+  background: var(--selection);
   color: var(--bright);
 }
 .graph-selection {
   margin-top: 16px;
   padding-top: 15px;
-  border-top: 1px solid #3e4452;
+  border-top: 1px solid var(--border-strong);
 }
 .graph-selection > h3 {
   overflow-wrap: anywhere;
@@ -249,17 +249,17 @@
   height: 150px;
   margin: 18px 0 4px;
   background: var(--sidebar);
-  border: 1px solid #3e4452;
+  border: 1px solid var(--border-strong);
   border-radius: 4px;
 }
 .bundling-preview path {
   fill: none;
-  stroke: var(--blue);
+  stroke: var(--accent);
   stroke-width: 1.5;
   opacity: 0.65;
 }
 .bundling-preview circle {
-  fill: var(--blue);
+  fill: var(--accent);
 }
 @media (max-width: 760px) {
   .graph-layout {
@@ -290,7 +290,7 @@
   .graph-details {
     max-height: 220px;
     border-left: 0;
-    border-top: 1px solid #3e4452;
+    border-top: 1px solid var(--border-strong);
   }
   .graph-toolbar {
     gap: 5px;

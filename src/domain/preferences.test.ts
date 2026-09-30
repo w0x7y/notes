@@ -5,6 +5,51 @@ import {
   preferencesSchema,
 } from "./preferences";
 import { settingsSchema } from "./contracts";
+it("defaults missing themes while preserving legacy preferences and settings", () => {
+  const settings = settingsSchema.parse({
+    preferences: { fontSize: 18, editorFont: "sans", graphBundling: 0.4 },
+    workspaces: [],
+    activeWorkspaceId: null,
+    sessions: {},
+    toolbarVisible: false,
+  });
+  expect(settings.preferences).toMatchObject({
+    theme: "graphite-amber",
+    fontSize: 18,
+    editorFont: "sans",
+    graphBundling: 0.4,
+  });
+  expect(settings.toolbarVisible).toBe(false);
+  expect(defaultPreferences).toHaveProperty("theme", "graphite-amber");
+});
+
+it.each([
+  "graphite-amber",
+  "ink-jade",
+  "midnight-ice",
+  "charcoal-coral",
+  "forest-moss",
+  "one-dark-pro",
+])(
+  "round-trips the saved %s theme without changing other preferences",
+  (theme) => {
+    const saved = preferencesSchema.parse({
+      theme,
+      fontSize: 18,
+      lineNumbers: true,
+    });
+    const restored = preferencesSchema.parse(JSON.parse(JSON.stringify(saved)));
+    expect(restored).toMatchObject({ theme, fontSize: 18, lineNumbers: true });
+  },
+);
+
+it.each(["unknown", "", "GraphiteAmber", "one-dark", null, 3])(
+  "rejects invalid theme %s at the preferences boundary",
+  (theme) => {
+    expect(preferencesSchema.safeParse({ theme }).success).toBe(false);
+  },
+);
+
 it("defaults and bounds hierarchical graph bundling strength", () => {
   expect(preferencesSchema.parse({}).graphBundling).toBe(0.85);
   for (const value of [0, 0.4, 0.85, 1])

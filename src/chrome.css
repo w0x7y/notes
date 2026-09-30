@@ -1,0 +1,521 @@
+/* App identity and compact task controls. Editor typography stays independent. */
+.app-shell {
+  font-family: var(--font-ui);
+}
+
+.brand-mark {
+  color: var(--accent);
+}
+
+.workspace-picker {
+  height: 67px;
+  gap: 8px;
+  padding-inline: 13px 9px;
+}
+
+.workspace-picker > .brand-mark {
+  flex: none;
+}
+
+.workspace-picker .workspace-menu {
+  min-width: 0;
+  flex: 1;
+}
+
+.workspace-picker .workspace-menu .menu-trigger {
+  min-height: 43px;
+  padding: 4px 5px;
+  border: 0;
+  gap: 5px;
+}
+
+.workspace-picker .workspace-menu .menu-trigger[aria-expanded="true"] {
+  background: var(--selection);
+}
+
+.workspace-picker .workspace-menu .menu-trigger[aria-expanded="true"] > svg {
+  color: var(--accent);
+  transform: rotate(180deg);
+}
+
+.workspace-identity {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+
+.workspace-app-name {
+  color: var(--bright);
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.workspace-current {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 450;
+}
+
+.workspace-current > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-search {
+  margin: 0 12px 7px;
+  border-color: var(--border);
+  background: var(--editor);
+  min-height: 33px;
+  padding: 6px 8px;
+  gap: 7px;
+}
+
+.sidebar-search > svg {
+  color: var(--muted);
+}
+
+.sidebar-search span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.sidebar-quick-actions {
+  display: flex;
+  gap: 5px;
+  padding: 0 12px 14px;
+  flex: none;
+}
+
+.sidebar-quick-actions button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  flex: 1;
+  min-width: 0;
+  min-height: 29px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  background: var(--editor);
+}
+
+.sidebar-quick-actions button > svg {
+  color: var(--muted);
+}
+
+.sidebar .sidebar-section .section-name,
+.sidebar .tag-section .section-name {
+  font-weight: 600;
+}
+
+.sidebar .sidebar-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 20px 16px;
+  line-height: 1.6;
+}
+
+.sidebar-empty button {
+  padding: 4px 0;
+  color: var(--text);
+  text-align: start;
+  font-size: 11px;
+  border-radius: 3px;
+}
+
+.sidebar-empty button kbd {
+  display: block;
+}
+
+.tabbar .tab {
+  border-right: 0;
+  margin: 3px 1px 0;
+  padding-right: 5px;
+  border-radius: 4px 4px 0 0;
+  color: var(--muted);
+}
+
+.tabbar .tab.active {
+  color: var(--bright);
+  background: var(--selection);
+}
+
+.tabbar .tab.active::after {
+  inset: auto 12px 0;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+
+.tabbar .tab-label {
+  padding-inline: 11px 7px;
+  font-size: 12px;
+}
+
+.tabbar .close-tab {
+  color: var(--muted);
+  opacity: 0;
+}
+
+.tabbar .tab.active .close-tab,
+.tabbar .tab:hover .close-tab,
+.tabbar .tab:focus-within .close-tab {
+  opacity: 1;
+}
+
+.app-shell .document-bar {
+  height: 43px;
+  padding-inline: 20px 12px;
+  border-bottom-color: var(--border);
+  gap: 8px;
+}
+
+.document-bar .breadcrumbs {
+  gap: 5px;
+  font-size: 11px;
+  flex: 1;
+}
+
+.document-bar .breadcrumbs > span {
+  max-width: 42%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.document-bar .breadcrumbs button {
+  color: var(--muted);
+  padding: 3px;
+  border-radius: 3px;
+}
+
+.document-bar .breadcrumbs button:focus-visible svg {
+  opacity: 1;
+}
+
+.document-bar .view-controls {
+  gap: 3px;
+}
+
+.document-bar .view-button {
+  justify-content: center;
+  padding-inline: 6px;
+  height: 26px;
+  gap: 5px;
+  font-size: 11px;
+}
+
+.document-bar .view-button[aria-pressed="true"] {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.note-view-switch {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  margin-inline-end: 5px;
+  background: var(--sidebar);
+  border-radius: 5px;
+}
+
+.document-bar .note-view-switch .view-button[aria-pressed="true"] {
+  color: var(--bright);
+  background: var(--selection);
+}
+
+.document-bar .note-tools-menu .menu-trigger {
+  padding: 0;
+  width: 27px;
+  min-height: 26px;
+  border: 0;
+  justify-content: center;
+}
+
+.note-tools-menu .menu-trigger-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.note-tools-menu .menu-trigger > svg {
+  display: none;
+}
+
+.app-shell .note-title {
+  font-family: var(--font-ui);
+  font-size: 29px;
+  font-weight: 650;
+  line-height: 1.35;
+  margin-block-end: 25px;
+}
+
+.app-shell .note-details {
+  width: 272px;
+  background: var(--sidebar);
+  color: var(--text);
+  font-family: var(--font-ui);
+}
+
+.editor-pane {
+  container-type: inline-size;
+}
+
+.app-shell .note-details-header {
+  height: 48px;
+  padding: 10px 13px;
+  border-bottom: 1px solid var(--border);
+}
+
+.note-details-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--bright);
+}
+
+.app-shell .note-details section {
+  padding: 15px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.app-shell .note-details section:last-child {
+  border-bottom: 0;
+}
+
+.app-shell .note-details h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 10px;
+  color: var(--bright);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.app-shell .note-details h3 > svg,
+.app-shell .note-details h3 > span {
+  color: var(--muted);
+}
+
+.app-shell .note-details h3 > span {
+  margin-inline-start: auto;
+  font-weight: 450;
+  font-variant-numeric: tabular-nums;
+}
+
+.app-shell .note-details p {
+  margin: 6px 0;
+  font-size: 11px;
+}
+
+.app-shell .note-details-link {
+  font-size: 12px;
+  padding-block: 6px;
+  line-height: 1.45;
+}
+
+.app-shell .note-backlink small {
+  font-size: 10px;
+  margin-top: 3px;
+}
+
+.app-shell .note-details .knowledge-properties {
+  grid-template-columns: minmax(0, 1fr);
+  padding: 0;
+  gap: 9px;
+}
+
+.app-shell .note-details .knowledge-properties > label {
+  display: grid;
+  grid-template-columns: 66px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+}
+
+.app-shell .note-details .knowledge-property-input input {
+  width: 100%;
+  min-width: 0;
+  padding: 5px 7px;
+  border-color: var(--border);
+  background: var(--editor);
+  font-size: 11px;
+}
+
+.app-shell .welcome > .brand-mark,
+.app-shell .pane-empty > .brand-mark {
+  color: var(--accent);
+}
+
+.app-shell .welcome,
+.app-shell .pane-empty {
+  gap: 15px;
+}
+
+.note-search-dialog .search-field,
+.command-dialog .search-field {
+  gap: 10px;
+  padding: 14px 17px;
+  border-color: var(--border);
+}
+
+.note-search-dialog .search-field > .brand-mark,
+.command-dialog .search-field > .brand-mark {
+  color: var(--accent);
+}
+
+.note-search-dialog .search-results,
+.command-dialog .search-results {
+  padding: 6px;
+}
+
+.note-search-dialog .search-result,
+.command-dialog .search-result {
+  gap: 10px;
+  padding: 9px 11px;
+  border-radius: 4px;
+}
+
+.note-search-dialog .search-result.selected,
+.command-dialog .search-result.selected {
+  background: var(--accent-soft);
+}
+
+.result-note-icon,
+.command-icon {
+  width: 25px;
+  height: 27px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  color: var(--muted);
+}
+
+.result-content,
+.command-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.note-search-dialog .result-title {
+  font-weight: 550;
+}
+
+.note-search-dialog .result-location {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-block-start: 2px;
+  font-size: 10px;
+}
+
+.result-workspace {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  max-width: 42%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.workspace-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.result-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.note-search-dialog .current-label {
+  color: var(--muted);
+  font-size: 10px;
+  padding: 2px 5px;
+  border-radius: 3px;
+  background: var(--selection);
+}
+
+.command-dialog .search-result {
+  min-height: 40px;
+  font-size: 12px;
+}
+
+.command-dialog .search-result.selected .command-icon {
+  color: var(--accent);
+}
+
+.sidebar-quick-actions button:hover,
+.sidebar-quick-actions button:focus-visible,
+.sidebar-search:focus-visible,
+.app-shell .note-details button:focus-visible,
+.app-shell .view-button:focus-visible,
+.app-shell .tab-label:focus-visible {
+  background: var(--hover);
+  color: var(--bright);
+}
+
+.app-shell .note-details input:focus-visible {
+  background: var(--selection);
+}
+
+@container (max-width: 650px) {
+  .app-shell .note-details {
+    position: absolute;
+    inset-block: 0;
+    inset-inline-end: 0;
+    z-index: 1;
+    width: min(272px, 100%);
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 900px) {
+  .app-shell .document-bar {
+    padding-inline: 12px 7px;
+  }
+
+  .split .note-view-switch .view-button > svg {
+    display: none;
+  }
+
+  .split .document-bar .breadcrumbs > span,
+  .split .document-bar .breadcrumbs > svg {
+    display: none;
+  }
+
+  .split .view-controls {
+    gap: 1px;
+  }
+}
+
+@media (max-width: 640px) {
+  .note-search-dialog .dialog-footer,
+  .command-dialog .dialog-footer {
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+
+  .note-search-dialog .current-label {
+    display: none;
+  }
+}

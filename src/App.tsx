@@ -1,18 +1,13 @@
 import { newLecture, openDaily, quickCapture } from "./knowledge/templates";
-import type { AppCommand } from "./knowledge/CommandDialog";
-import type { WorkspaceTool } from "./knowledge/WorkspaceTools";
 import {
   lazy,
   Suspense,
   useCallback,
   useEffect,
+  useMemo,
   useState,
-  type CSSProperties,
 } from "react";
-import { editorFontFamily } from "./domain/preferences";
 import {
-  BookOpen,
-  FileText,
   FolderOpen,
   PanelLeftClose,
   PanelLeftOpen,
@@ -22,6 +17,7 @@ import {
   X,
 } from "lucide-react";
 import { Sidebar } from "./components/Sidebar";
+import { BrandMark } from "./components/BrandMark";
 const ContentSearchDialog = lazy(() =>
   import("./knowledge/ContentSearchDialog").then((m) => ({
     default: m.ContentSearchDialog,
@@ -92,8 +88,8 @@ import { ImagePane } from "./components/ImagePane";
 import type { NoteDocument } from "./domain/document";
 import {
   addWorkspace,
-  changeSession,
   closeFile,
+  createFolder,
   deleteEntry,
   renameImage,
   moveEntry,
@@ -108,6 +104,10 @@ import {
   loadDocument,
   newNote,
   openFile,
+  openInSplit,
+  toggleSplit,
+  cycleTab,
+  focusPane,
   refreshWorkspace,
   renameNote,
   run,
@@ -117,6 +117,11 @@ import {
   useApp,
 } from "./domain/app-store";
 import { basename } from "./domain/notes";
+import { sessionFocusedPath } from "./domain/workspace-session";
+import {
+  commandForShortcut,
+  createWorkspaceCommands,
+} from "./domain/workspace-commands";
 import { chooseWorkspaceFolder, files } from "./platform";
 
 type Modal =
@@ -142,12 +147,19 @@ type Modal =
   | { kind: "remove-workspace"; id: string; name: string; path: string }
   | null;
 
+function commitFocusedDraft() {
+  const active = document.activeElement;
+  if (
+    (active instanceof HTMLInputElement &&
+      active.closest(".knowledge-property-input")) ||
+    (active instanceof HTMLTextAreaElement &&
+      active.closest(".drawing-text-editor"))
+  )
+    active.blur();
+}
+
 export default function App() {
   const state = useApp();
-  const typography: CSSProperties & { "--font-ui": string } = {
-    "--font-ui": editorFontFamily(state.preferences),
-    fontFamily: "var(--font-ui)",
-  };
   const [modal, setModal] = useState<Modal>(null);
   const [sidebar, setSidebar] = useState(true);
   const selectedFolder = state.selectedFolder;
@@ -158,10 +170,7 @@ export default function App() {
   );
   const entries = state.entries[workspace?.id ?? ""] ?? [];
   const session = state.sessions[workspace?.id ?? ""] ?? emptySession();
-  const focusedPath =
-    state.focusedPane === "secondary" && session.split
-      ? session.secondary
-      : session.primary;
+  const focusedPath = sessionFocusedPath(session, state.focusedPane);
   const appearances = state.appearances[workspace?.id ?? ""] ?? {};
   const closeModal = () => setModal(null);
   const openRename = useCallback(
@@ -176,19 +185,74 @@ export default function App() {
       setSelectedFolder("");
     }
   }, []);
-  const toggleSplit = useCallback(() => {
-    const current = useApp.getState();
-    if (!current.activeWorkspaceId) return;
-    changeSession(current.activeWorkspaceId, (value) => ({
-      ...value,
-      split: !value.split,
-      secondary:
-        value.secondary ??
-        value.tabs.find((path) => path !== value.primary) ??
-        null,
-    }));
-    useApp.setState({ focusedPane: "primary" });
-  }, []);
+  const workspaceCommands = useMemo(
+    () =>
+      createWorkspaceCommands({
+        context: (purpose) => {
+          const current = useApp.getState();
+          const id = current.activeWorkspaceId;
+          return {
+            workspace: id
+              ? {
+                  id,
+                  selectedFolder: current.selectedFolder,
+                  focusedPath: sessionFocusedPath(
+                    currentSession(),
+                    current.focusedPane,
+                  ),
+                }
+              : null,
+            // The DOM still contains an exiting dialog during render. Sample
+            // nested drawing/busy dialogs at invocation, not when offering commands.
+            modal:
+              purpose === "execution" &&
+              document.querySelector('dialog[open][aria-busy="true"]')
+                ? "busy"
+                : purpose === "execution" &&
+                    document.querySelector(".drawing-dialog[open]")
+                  ? "drawing"
+                  : modal?.kind === "commands"
+                    ? "palette"
+                    : modal ||
+                        (purpose === "execution" &&
+                          document.querySelector("dialog[open]"))
+                      ? "dialog"
+                      : "none",
+          };
+        },
+        global: {
+          titles: (query = "") => setModal({ kind: "search", query }),
+          contents: () => setModal({ kind: "contents" }),
+          commands: () => setModal({ kind: "commands" }),
+          capture: quickCapture,
+          daily: openDaily,
+          workspace: openFolder,
+          settings: () => setModal({ kind: "settings" }),
+          save: flushAll,
+          sidebar: () => setSidebar((value) => !value),
+        },
+        workspace: {
+          new: ({ id, selectedFolder }) => newNote(id, selectedFolder),
+          lecture: ({ id }) => newLecture(id),
+          templates: () => setModal({ kind: "templates" }),
+          graph: () => setModal({ kind: "graph" }),
+          tasks: () => setModal({ kind: "tasks" }),
+          projects: () => setModal({ kind: "projects" }),
+          split: toggleSplit,
+          refresh: ({ id }) => refreshWorkspace(id),
+          close: ({ id, focusedPath }) =>
+            focusedPath ? closeFile(id, focusedPath) : undefined,
+          "next-tab": () => cycleTab(),
+          "previous-tab": () => cycleTab(true),
+          folder: () => setModal({ kind: "folder" }),
+          "workspace-settings": () => setModal({ kind: "workspace" }),
+        },
+        beforeExecute: commitFocusedDraft,
+        dismissPalette: () => setModal(null),
+        reportError: showError,
+      }),
+    [modal, openFolder],
+  );
 
   useEffect(() => {
     if (!useApp.getState().ready) void initialize();
@@ -198,89 +262,18 @@ export default function App() {
   }, [state.activeWorkspaceId]);
   useEffect(() => {
     const keyboard = (event: KeyboardEvent) => {
-      if (!event.ctrlKey && !event.metaKey) return;
-      if (document.querySelector(".drawing-dialog[open]")) {
-        if (event.key.toLowerCase() === "s") {
-          event.preventDefault();
-          run(flushAll());
-        } else if (
-          ["w", "n", "p", ",", "tab", "\\"].includes(event.key.toLowerCase())
-        )
-          event.preventDefault();
-        return;
-      }
-      if (document.querySelector('dialog[aria-busy="true"]')) {
-        event.preventDefault();
-        return;
-      }
-      const current = useApp.getState();
-      const id = current.activeWorkspaceId;
-      const value = currentSession();
-      const key = event.key.toLowerCase();
-      if (key === ",") {
-        event.preventDefault();
-        setModal({ kind: "settings" });
-      }
-      if (key === "p") {
-        event.preventDefault();
-        setModal(
-          event.shiftKey ? { kind: "contents" } : { kind: "search", query: "" },
-        );
-      }
-      if (key === "k") {
-        event.preventDefault();
-        setModal({ kind: "commands" });
-      }
-      if (key === "d" && event.shiftKey && !modal) {
-        event.preventDefault();
-        run(openDaily());
-      }
-      if (key === "n" && event.shiftKey && !modal) {
-        event.preventDefault();
-        run(quickCapture());
-        return;
-      }
-      if (key === "s") {
-        event.preventDefault();
-        run(flushAll());
-      }
-      if (key === "n" && id && !modal) {
-        event.preventDefault();
-        run(newNote(id, selectedFolder));
-      }
-      if (key === "w" && id && !modal) {
-        event.preventDefault();
-        const path =
-          current.focusedPane === "secondary" && value.split
-            ? value.secondary
-            : value.primary;
-        if (path) run(closeFile(id, path));
-      }
-      if (key === "\\" && !modal) {
-        event.preventDefault();
-        toggleSplit();
-      }
-      if (key === "tab" && id && !modal) {
-        event.preventDefault();
-        const active =
-          current.focusedPane === "secondary" && value.split
-            ? value.secondary
-            : value.primary;
-        const index = value.tabs.indexOf(active ?? "");
-        const next =
-          value.tabs[
-            (index + (event.shiftKey ? -1 : 1) + value.tabs.length) %
-              value.tabs.length
-          ];
-        if (next) openFile(id, next);
-      }
+      const command = commandForShortcut(event);
+      if (!command) return;
+      event.preventDefault();
+      void workspaceCommands.dispatch(command, "keyboard");
     };
     document.addEventListener("keydown", keyboard);
     return () => document.removeEventListener("keydown", keyboard);
-  }, [modal, selectedFolder, toggleSplit]);
+  }, [workspaceCommands]);
 
   useEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => {
+      commitFocusedDraft();
       if (hasUnsavedChanges()) {
         event.preventDefault();
         event.returnValue = "";
@@ -303,6 +296,7 @@ export default function App() {
             async (event) => {
               event.preventDefault();
               try {
+                commitFocusedDraft();
                 await flushAll();
                 await nativeWindow.destroy();
               } catch (error) {
@@ -322,97 +316,6 @@ export default function App() {
     };
   }, []);
 
-  function openTool(tool: WorkspaceTool) {
-    if (tool === "capture") run(quickCapture());
-    else if (tool === "daily") run(openDaily());
-    else setModal({ kind: tool });
-  }
-  const commands: AppCommand[] = [
-    {
-      id: "titles",
-      label: "Find a note by title or tag",
-      shortcut: "Ctrl P",
-      run: () => setModal({ kind: "search", query: "" }),
-    },
-    {
-      id: "contents",
-      label: "Search note contents",
-      shortcut: "Ctrl Shift P",
-      run: () => setModal({ kind: "contents" }),
-    },
-    {
-      id: "capture",
-      label: "Quick capture in Inbox",
-      shortcut: "Ctrl Shift N",
-      run: quickCapture,
-    },
-    {
-      id: "daily",
-      label: "Open today's note",
-      shortcut: "Ctrl Shift D",
-      run: openDaily,
-    },
-    { id: "workspace", label: "Open a workspace folder", run: openFolder },
-    {
-      id: "settings",
-      label: "Open settings",
-      shortcut: "Ctrl ,",
-      run: () => setModal({ kind: "settings" }),
-    },
-    { id: "save", label: "Save all notes", shortcut: "Ctrl S", run: flushAll },
-    {
-      id: "sidebar",
-      label: "Toggle sidebar",
-      run: () => setSidebar((s) => !s),
-    },
-    ...(workspace
-      ? ([
-          {
-            id: "new",
-            label: "Create a new note",
-            shortcut: "Ctrl N",
-            run: () => newNote(workspace.id, selectedFolder),
-          },
-          {
-            id: "lecture",
-            label: "New lecture note",
-            run: () => newLecture(workspace.id),
-          },
-          {
-            id: "templates",
-            label: "New note from template",
-            run: () => setModal({ kind: "templates" }),
-          },
-          {
-            id: "graph",
-            label: "Open note graph · hierarchical edge bundling",
-            run: () => setModal({ kind: "graph" }),
-          },
-          {
-            id: "tasks",
-            label: "Show workspace tasks",
-            run: () => setModal({ kind: "tasks" }),
-          },
-          {
-            id: "projects",
-            label: "Projects and assignments table / board",
-            run: () => setModal({ kind: "projects" }),
-          },
-          {
-            id: "split",
-            label: "Toggle split pane",
-            shortcut: "Ctrl \\",
-            run: toggleSplit,
-          },
-          {
-            id: "refresh",
-            label: "Refresh workspace files",
-            run: () => refreshWorkspace(workspace.id),
-          },
-        ] satisfies AppCommand[])
-      : []),
-  ];
-
   function renderPane(path: string | null, pane: "primary" | "secondary") {
     if (!workspace) return null;
     const entry = entries.find((item) => item.path === path);
@@ -421,12 +324,10 @@ export default function App() {
         className={`editor-pane ${state.focusedPane === pane ? "focused-pane" : ""}`}
         aria-label={pane === "primary" ? "Primary pane" : "Secondary pane"}
         onFocusCapture={() => {
-          if (useApp.getState().focusedPane !== pane)
-            useApp.setState({ focusedPane: pane });
+          focusPane(pane);
         }}
         onPointerDown={() => {
-          if (useApp.getState().focusedPane !== pane)
-            useApp.setState({ focusedPane: pane });
+          focusPane(pane);
         }}
       >
         {path ? (
@@ -445,7 +346,7 @@ export default function App() {
           )
         ) : (
           <div className="pane-empty">
-            <FileText size={26} strokeWidth={1.2} />
+            <BrandMark size={36} />
             <h2>
               {pane === "secondary"
                 ? "Open a note beside your work"
@@ -458,7 +359,9 @@ export default function App() {
             </p>
             <button
               className="button"
-              onClick={() => run(newNote(workspace.id, selectedFolder))}
+              onClick={() => {
+                void workspaceCommands.dispatch("new", "button");
+              }}
             >
               <Plus size={15} />
               New note <kbd>Ctrl N</kbd>
@@ -472,7 +375,6 @@ export default function App() {
   return (
     <div
       className={`app-shell ${sidebar ? "" : "sidebar-hidden"}`}
-      style={typography}
       onContextMenu={(event) => event.preventDefault()}
     >
       {sidebar && (
@@ -488,21 +390,7 @@ export default function App() {
             if (workspace) openFile(workspace.id, path);
           }}
           onOpenSplit={(path) => {
-            if (!workspace) return;
-            const other =
-              focusedPath === path
-                ? (session.tabs.find((item) => item !== path) ?? null)
-                : focusedPath;
-            changeSession(workspace.id, (value) => ({
-              ...value,
-              primary: other,
-              secondary: path,
-              split: true,
-              tabs: value.tabs.includes(path)
-                ? value.tabs
-                : [...value.tabs, path],
-            }));
-            useApp.setState({ focusedPane: "secondary" });
+            if (workspace) openInSplit(workspace.id, path);
           }}
           onRename={(path) => {
             if (
@@ -572,15 +460,25 @@ export default function App() {
               });
           }}
           onWorkspace={switchWorkspace}
-          onAddWorkspace={() => run(openFolder())}
-          onSettings={() => setModal({ kind: "workspace" })}
-          onAppSettings={() => setModal({ kind: "settings" })}
-          onSearch={(query = "") => setModal({ kind: "search", query })}
-          onNewNote={() => {
-            if (workspace) run(newNote(workspace.id, selectedFolder));
+          commands={workspaceCommands.available("tools")}
+          onCommand={(id) => {
+            void workspaceCommands.dispatch(id, "tools");
           }}
-          onNewFolder={() => setModal({ kind: "folder" })}
-          onTool={openTool}
+          onAddWorkspace={() => {
+            void workspaceCommands.dispatch("workspace", "button");
+          }}
+          onAppSettings={() => {
+            void workspaceCommands.dispatch("settings", "button");
+          }}
+          onSearch={(query = "") => {
+            void workspaceCommands.dispatch("titles", "button", query);
+          }}
+          onNewNote={() => {
+            void workspaceCommands.dispatch("new", "button");
+          }}
+          onNewFolder={() => {
+            void workspaceCommands.dispatch("folder", "button");
+          }}
         />
       )}
       <main className="main-shell">
@@ -588,7 +486,9 @@ export default function App() {
           <button
             className="icon-button sidebar-toggle"
             aria-label={sidebar ? "Hide sidebar" : "Show sidebar"}
-            onClick={() => setSidebar((value) => !value)}
+            onClick={() => {
+              void workspaceCommands.dispatch("sidebar", "button");
+            }}
           >
             {sidebar ? (
               <PanelLeftClose size={15} />
@@ -607,7 +507,10 @@ export default function App() {
                 onAuxClick={(event) => {
                   if (event.button === 1) {
                     event.preventDefault();
-                    if (workspace) run(closeFile(workspace.id, path));
+                    if (workspace) {
+                      commitFocusedDraft();
+                      run(closeFile(workspace.id, path));
+                    }
                   }
                 }}
               >
@@ -620,23 +523,30 @@ export default function App() {
                     if (workspace) openFile(workspace.id, path);
                   }}
                 >
-                  <ItemIcon
-                    name={appearances[path]?.icon}
-                    size={14}
-                    fallback={
-                      entries.find((entry) => entry.path === path)?.kind ===
-                      "image"
-                        ? "image"
-                        : "file"
-                    }
-                  />
+                  {(appearances[path]?.icon ||
+                    entries.find((entry) => entry.path === path)?.kind ===
+                      "image") && (
+                    <ItemIcon
+                      name={appearances[path]?.icon}
+                      size={14}
+                      fallback={
+                        entries.find((entry) => entry.path === path)?.kind ===
+                        "image"
+                          ? "image"
+                          : "file"
+                      }
+                    />
+                  )}
                   <span dir="auto">{basename(path)}</span>
                 </button>
                 <button
                   className="close-tab"
                   aria-label={`Close ${basename(path)}`}
                   onClick={() => {
-                    if (workspace) run(closeFile(workspace.id, path));
+                    if (workspace) {
+                      commitFocusedDraft();
+                      run(closeFile(workspace.id, path));
+                    }
                   }}
                 >
                   <X size={12} />
@@ -651,7 +561,9 @@ export default function App() {
                   className="icon-button"
                   aria-label="Create note"
                   title="New note (Ctrl+N)"
-                  onClick={() => run(newNote(workspace.id, selectedFolder))}
+                  onClick={() => {
+                    void workspaceCommands.dispatch("new", "button");
+                  }}
                 >
                   <Plus size={16} />
                 </button>
@@ -660,7 +572,9 @@ export default function App() {
                   aria-label="Toggle split pane"
                   aria-pressed={session.split}
                   title="Split pane (Ctrl+\)"
-                  onClick={toggleSplit}
+                  onClick={() => {
+                    void workspaceCommands.dispatch("split", "button");
+                  }}
                 >
                   {session.split ? (
                     <PanelRightClose size={16} />
@@ -688,7 +602,7 @@ export default function App() {
           <div className="pane-empty">Opening your workspaces…</div>
         ) : !workspace ? (
           <div className="welcome">
-            <BookOpen size={36} strokeWidth={1.2} />
+            <BrandMark size={52} />
             <h1>A place to think.</h1>
             <p>
               Open a folder of Markdown notes.
@@ -697,7 +611,9 @@ export default function App() {
             </p>
             <button
               className="button primary"
-              onClick={() => run(openFolder())}
+              onClick={() => {
+                void workspaceCommands.dispatch("workspace", "button");
+              }}
             >
               <FolderOpen size={17} />
               Open a workspace
@@ -734,7 +650,13 @@ export default function App() {
           <ContentSearchDialog onClose={closeModal} />
         )}
         {modal?.kind === "commands" && (
-          <CommandDialog commands={commands} onClose={closeModal} />
+          <CommandDialog
+            commands={workspaceCommands.available("palette")}
+            onChoose={(id) => {
+              void workspaceCommands.dispatch(id, "palette");
+            }}
+            onClose={closeModal}
+          />
         )}
         {modal?.kind === "templates" && workspace && (
           <TemplateDialog workspaceId={workspace.id} onClose={closeModal} />
@@ -781,10 +703,9 @@ export default function App() {
             hint={`Inside ${selectedFolder || workspace.name}`}
             submitLabel="Create folder"
             onClose={closeModal}
-            onSubmit={async (name) => {
-              await files.createFolder(workspace.id, selectedFolder, name);
-              await refreshWorkspace(workspace.id);
-            }}
+            onSubmit={(name) =>
+              createFolder(workspace.id, selectedFolder, name)
+            }
           />
         )}
         {modal?.kind === "appearance" && (

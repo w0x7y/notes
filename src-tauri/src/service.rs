@@ -4,13 +4,16 @@ use crate::model::{
     Appearance, DeleteResult, Entry, NoteFile, Preferences, RenameImageResult, Rewrite, SaveResult,
     Session, Settings, Snapshot, Stored, Workspace,
 };
-use crate::pathing::{clean_filename, normalized_relative, relative, resolve, unique_file};
+use crate::pathing::{
+    clean_filename, normalized_relative, open_regular, read_regular_text, relative, resolve,
+    unique_file,
+};
 use crate::scan_cache::ScanCache;
 use base64::Engine;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::UNIX_EPOCH;
@@ -20,7 +23,7 @@ use walkdir::WalkDir;
 // Apply the same boundary to indexing and incoming-link rewrites. Explicitly
 // chosen workspace roots remain readable, even when their name is excluded.
 pub(crate) fn workspace_entry(entry: &walkdir::DirEntry) -> bool {
-    if entry.file_type().is_symlink() {
+    if !entry.file_type().is_dir() && !entry.file_type().is_file() {
         return false;
     }
     if entry.depth() == 0 || !entry.file_type().is_dir() {
@@ -155,7 +158,7 @@ fn note_content(path: &Path) -> Result<String, String> {
     {
         return Err("Only Markdown notes can be opened".into());
     }
-    fs::read_to_string(path).map_err(|e| err("Cannot read note", e))
+    read_regular_text(path).map_err(|e| err("Cannot read note", e))
 }
 fn workspace<'a>(settings: &'a Settings, id: &str) -> Result<&'a Workspace, String> {
     settings
@@ -178,8 +181,8 @@ impl Service {
             .map_err(|e| err("Cannot create app config directory", e))?;
         let config_file = config_dir.join("notes.json");
         let state: Stored = if config_file.exists() {
-            serde_json::from_slice(
-                &fs::read(&config_file).map_err(|e| err("Cannot read settings", e))?,
+            serde_json::from_str(
+                &read_regular_text(&config_file).map_err(|e| err("Cannot read settings", e))?,
             )
             .map_err(|e| err("Cannot parse settings", e))?
         } else {
@@ -374,13 +377,23 @@ impl Service {
         let relative = format!("assets/drawings/{}.svg", revision(svg));
         let target = resolve(root, &relative, false)?;
         if target.exists() {
-            if fs::metadata(&target)
+            let file = open_regular(&target).map_err(|e| err("Cannot read drawing preview", e))?;
+            let mut existing = Vec::new();
+            let length = svg.len() as u64;
+            if file
+                .metadata()
                 .map_err(|e| err("Cannot inspect drawing preview", e))?
                 .len()
-                != svg.len() as u64
-                || fs::read(&target).map_err(|e| err("Cannot read drawing preview", e))?
-                    != svg.as_bytes()
+                != length
             {
+                return Err(
+                    "Existing drawing preview has changed; refusing to overwrite it".into(),
+                );
+            }
+            file.take(length + 1)
+                .read_to_end(&mut existing)
+                .map_err(|e| err("Cannot read drawing preview", e))?;
+            if existing != svg.as_bytes() {
                 return Err(
                     "Existing drawing preview has changed; refusing to overwrite it".into(),
                 );
@@ -965,16 +978,25 @@ impl Service {
             "avif" => "image/avif",
             _ => return Err("Unsupported image type".into()),
         };
-        if fs::metadata(&full)
+        const MAX_IMAGE_BYTES: u64 = 20 * 1024 * 1024;
+        let file = open_regular(&full).map_err(|e| err("Cannot read image", e))?;
+        if file
+            .metadata()
             .map_err(|e| err("Cannot inspect image", e))?
             .len()
-            > 20 * 1024 * 1024
+            > MAX_IMAGE_BYTES
         {
             return Err("Image exceeds 20 MB limit".into());
         }
+        let mut bytes = Vec::new();
+        file.take(MAX_IMAGE_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|e| err("Cannot read image", e))?;
+        if bytes.len() as u64 > MAX_IMAGE_BYTES {
+            return Err("Image exceeds 20 MB limit".into());
+        }
         Ok(ImageData {
-            data: base64::engine::general_purpose::STANDARD
-                .encode(fs::read(full).map_err(|e| err("Cannot read image", e))?),
+            data: base64::engine::general_purpose::STANDARD.encode(bytes),
             mime: mime.into(),
         })
     }
@@ -1004,4 +1026,81 @@ fn move_without_overwrite(source: &Path, target: &Path) -> Result<(), String> {
 pub struct ImageData {
     pub data: String,
     pub mime: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scan_cache::ReadPause;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    #[test]
+    fn slow_scan_does_not_block_note_saves_or_other_workspace_scans() {
+        let config = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        fs::write(root.path().join("a.md"), "# Original").unwrap();
+        fs::write(other.path().join("other.md"), "# Other").unwrap();
+        let service = Arc::new(Service::new(config.path().to_path_buf()).unwrap());
+        let id = service
+            .add_workspace(root.path().to_str().unwrap())
+            .unwrap()
+            .workspace
+            .id;
+        let other_id = service
+            .add_workspace(other.path().to_str().unwrap())
+            .unwrap()
+            .workspace
+            .id;
+        let revision = service.read_note(&id, "a.md").unwrap().revision;
+        // Force a real cache miss, then pause only this service's ordinary note read.
+        service.scan_cache.invalidate(&root.path().join("a.md"));
+        service
+            .scan_cache
+            .invalidate(&other.path().join("other.md"));
+        let (entered_sender, entered) = mpsc::channel();
+        let (resume, resume_receiver) = mpsc::channel();
+        *service.scan_cache.read_pause.lock().unwrap() = Some(ReadPause {
+            path: root.path().join("a.md"),
+            entered: entered_sender,
+            resume: resume_receiver,
+        });
+        let scan_service = service.clone();
+        let scan_id = id.clone();
+        let scan = std::thread::spawn(move || scan_service.scan_workspace(&scan_id));
+        let scan_entered = entered.recv_timeout(Duration::from_secs(1));
+        let (save_sender, saved) = mpsc::channel();
+        let save_service = service.clone();
+        let save = std::thread::spawn(move || {
+            let result = save_service.save_note(&id, "a.md", "# Saved", &revision);
+            let _ = save_sender.send(result);
+        });
+        let (other_sender, other_scanned) = mpsc::channel();
+        let other_scan = std::thread::spawn(move || {
+            let _ = other_sender.send(service.scan_workspace(&other_id));
+        });
+        let saved_while_stalled = saved.recv_timeout(Duration::from_secs(1));
+        let other_scanned_while_stalled = other_scanned.recv_timeout(Duration::from_secs(1));
+        let scan_still_stalled = !scan.is_finished();
+        // Always release and join all workers before asserting, including failure paths.
+        let _ = resume.send(());
+        let scan_result = scan.join();
+        let save_result = save.join();
+        let other_result = other_scan.join();
+        assert!(scan_entered.is_ok(), "scan did not reach ordinary note I/O");
+        assert!(
+            scan_still_stalled,
+            "scan was not held during concurrent operations"
+        );
+        assert!(saved_while_stalled.unwrap().is_ok());
+        assert!(other_scanned_while_stalled.unwrap().is_ok());
+        assert!(scan_result.unwrap().is_ok());
+        save_result.unwrap();
+        other_result.unwrap();
+        assert_eq!(
+            fs::read_to_string(root.path().join("a.md")).unwrap(),
+            "# Saved"
+        );
+    }
 }

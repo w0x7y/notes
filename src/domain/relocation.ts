@@ -1,23 +1,22 @@
 import { remapFavorites } from "../knowledge/library";
 import type { AppState } from "./app-store";
-import type { Entry, FileService, NoteFile, SaveResult } from "./contracts";
+import type { Entry, FileService, SaveResult } from "./contracts";
 import type { NoteDocument } from "./document";
+import type { DocumentLifetime } from "./document-lifetime";
+import { transitionSession } from "./workspace-session";
 import { errorMessage, extractTags, noteTitle } from "./notes";
 
 type Host = {
   setState: (
     update: Partial<AppState> | ((state: AppState) => Partial<AppState>),
   ) => void;
-  documents: Map<string, NoteDocument>;
-  loading: Map<string, Promise<NoteDocument>>;
+  lifetime: DocumentLifetime;
   files: FileService;
   persist: () => Promise<void>;
   persistSoon: () => void;
   refresh: (workspaceId: string) => Promise<void>;
   report: (error: unknown) => void;
-  register: (workspaceId: string, note: NoteFile) => NoteDocument;
 };
-const key = (workspaceId: string, path: string) => `${workspaceId}\0${path}`;
 
 /** Owns relocation ordering and every in-memory consequence of a path change. */
 export class Relocations {
@@ -53,7 +52,7 @@ export class Relocations {
   createNote(workspaceId: string, folder: string): Promise<NoteDocument> {
     return this.atPath(workspaceId, folder, async (currentFolder) => {
       const note = await this.host.files.createNote(workspaceId, currentFolder);
-      const document = this.host.register(workspaceId, note);
+      const document = this.host.lifetime.register(workspaceId, note);
       this.saved(document, note.path, { ...note, rewritten: [], warnings: [] });
       return document;
     });
@@ -205,34 +204,17 @@ export class Relocations {
     operation: () => Promise<void>,
     except?: NoteDocument,
   ): Promise<void> {
-    await Promise.all([...this.host.loading.values()]);
-    const documents = [...this.host.documents.values()].filter(
-      (document) => document !== except,
-    );
-    const held = await Promise.allSettled(
-      documents.map((document) => document.holdSaves()),
-    );
+    let committed = false;
     try {
-      for (const result of held)
-        if (result.status === "rejected") throw result.reason;
-      await this.host.persist();
-      await operation();
-    } finally {
-      for (const result of held)
-        if (result.status === "fulfilled") result.value();
+      await this.host.lifetime.withHeldSaves(async () => {
+        await this.host.persist();
+        await operation();
+        committed = true;
+      }, except);
+    } catch (error) {
+      if (!committed) throw error;
+      this.reportWarnings([errorMessage(error)]);
     }
-    // Edits made while held use the reconciled path and revision. Failed saves
-    // retain the buffer and are reported separately from the committed move.
-    const saves = await Promise.allSettled(
-      documents
-        .filter((document) => document.dirty)
-        .map((document) => document.flush()),
-    );
-    this.reportWarnings(
-      saves.flatMap((result) =>
-        result.status === "rejected" ? [errorMessage(result.reason)] : [],
-      ),
-    );
   }
 
   private remap(
@@ -247,46 +229,34 @@ export class Relocations {
       path === from || (kind === "folder" && path.startsWith(from + "/"))
         ? to + path.slice(from.length)
         : path;
-    const moved: NoteDocument[] = [];
+    const moved = this.host.lifetime.remap(workspaceId, map);
     for (const location of this.waitingPaths) {
       if (location.workspaceId === workspaceId)
         location.path = map(location.path);
-    }
-    for (const [oldKey, document] of [...this.host.documents]) {
-      if (document.workspaceId !== workspaceId) continue;
-      const current = document.getSnapshot().path;
-      // A note save publishes its new path before this callback.
-      if (
-        current === to &&
-        kind === "note" &&
-        oldKey === key(workspaceId, from)
-      ) {
-        this.host.documents.delete(oldKey);
-        this.host.documents.set(key(workspaceId, to), document);
-      } else if (map(current) !== current) {
-        const updated = map(current);
-        this.host.documents.delete(oldKey);
-        this.host.documents.set(key(workspaceId, updated), document);
-        document.relocatePath(updated);
-        moved.push(document);
-      }
     }
     remapFavorites(workspaceId, map);
     this.host.setState((state) => {
       const session = state.sessions[workspaceId];
       const navigation = state.navigation;
+      const view = session
+        ? transitionSession(
+            session,
+            state.activeWorkspaceId === workspaceId
+              ? state.focusedPane
+              : "primary",
+            { kind: "remap", mapPath: map },
+          )
+        : null;
       return {
         sessions: session
           ? {
               ...state.sessions,
-              [workspaceId]: {
-                ...session,
-                tabs: session.tabs.map(map),
-                primary: session.primary ? map(session.primary) : null,
-                secondary: session.secondary ? map(session.secondary) : null,
-              },
+              [workspaceId]: view?.session ?? session,
             }
           : state.sessions,
+        ...(view && state.activeWorkspaceId === workspaceId
+          ? { focusedPane: view.focusedPane }
+          : {}),
         entries: {
           ...state.entries,
           [workspaceId]: (state.entries[workspaceId] ?? []).map((entry) => ({
@@ -324,8 +294,8 @@ export class Relocations {
     if (!rewrites.length) return;
     this.changes++;
     for (const rewrite of rewrites) {
-      this.host.documents
-        .get(key(rewrite.workspaceId, rewrite.path))
+      this.host.lifetime
+        .peek(rewrite.workspaceId, rewrite.path)
         ?.receiveExternal(rewrite.content, rewrite.revision);
     }
     this.host.setState((state) => {

@@ -12,7 +12,7 @@
 .settings-nav {
   padding: 14px 8px;
   background: var(--sidebar);
-  border-right: 1px solid #3e4452;
+  border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -24,7 +24,7 @@
   font-size: 12px;
 }
 .settings-nav button[aria-current] {
-  background: #2c313a;
+  background: var(--selection);
   color: var(--bright);
 }
 .settings-content {
@@ -46,7 +46,7 @@
   gap: 18px;
   min-height: 43px;
   padding: 8px 0;
-  border-bottom: 1px solid #303640;
+  border-bottom: 1px solid var(--border);
   font-size: 12px;
 }
 .setting-label {
@@ -62,7 +62,7 @@
   width: 29px;
   height: 17px;
   border-radius: 10px;
-  background: #4b5263;
+  background: var(--border-strong);
   padding: 3px;
   flex: none;
 }
@@ -71,13 +71,13 @@
   width: 11px;
   height: 11px;
   border-radius: 50%;
-  background: #abb2bf;
+  background: var(--text);
 }
 .setting-switch[aria-checked="true"] {
-  background: #4478a0;
+  background: var(--accent);
 }
 .setting-switch[aria-checked="true"] span {
-  background: #e6eff7;
+  background: var(--accent-ink);
   transform: translateX(12px);
 }
 .setting-range {
@@ -88,7 +88,7 @@
 }
 .setting-range input {
   width: 100px;
-  accent-color: #61afef;
+  accent-color: var(--accent);
 }
 .setting-range output {
   width: 48px;
@@ -131,7 +131,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  border-top: 1px solid #3e4452;
+  border-top: 1px solid var(--border);
 }
 .settings-error {
   margin: 0 18px 12px;
@@ -146,7 +146,7 @@
   justify-content: space-between;
   gap: 14px;
   padding: 10px 0;
-  border-bottom: 1px solid #303640;
+  border-bottom: 1px solid var(--border);
 }
 .shortcut-list dd {
   margin: 0;

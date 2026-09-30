@@ -1,4 +1,32 @@
+use std::fs::{File, OpenOptions};
+use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
+
+pub(crate) fn open_regular(path: &Path) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // Opening a FIFO normally waits for a writer before metadata can be checked.
+        // No-follow also rejects a final symlink substituted after path resolution.
+        options.custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW);
+    }
+    let file = options.open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Only regular files can be read",
+        ));
+    }
+    Ok(file)
+}
+
+pub(crate) fn read_regular_text(path: &Path) -> io::Result<String> {
+    let mut text = String::new();
+    open_regular(path)?.read_to_string(&mut text)?;
+    Ok(text)
+}
 
 pub fn relative(path: &str, allow_empty: bool) -> Result<PathBuf, String> {
     if path.is_empty() && allow_empty {

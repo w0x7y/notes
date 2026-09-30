@@ -16,6 +16,7 @@ import {
   PencilRuler,
   Pin,
   PanelRight,
+  MoreHorizontal,
 } from "lucide-react";
 import type { NoteDocument } from "../domain/document";
 import {
@@ -40,6 +41,7 @@ import {
   type Format,
 } from "../editor/CodeEditor";
 import { FormattingToolbar } from "./FormattingToolbar";
+import { MenuButton } from "./PopupMenu";
 import { editorFontFamily } from "../domain/preferences";
 import { toggleFavorite, useLibrary } from "../knowledge/library";
 import "../knowledge/note-details.css";
@@ -174,6 +176,7 @@ function NoteView({
     }
   }, [preview]);
   const format = (command: Format) => {
+    if (!document.getSnapshot().editable) return;
     if (editor.current) editor.current.format(command);
     else {
       pendingFormat.current = command;
@@ -182,7 +185,7 @@ function NoteView({
   };
   return (
     <>
-      <div className="document-bar">
+      <div className="document-bar" inert={!snapshot.editable}>
         <div className="breadcrumbs">
           <span>{parentFolder(snapshot.path) || "Notes"}</span>
           <ChevronRight size={12} />
@@ -195,6 +198,24 @@ function NoteView({
           </button>
         </div>
         <div className="view-controls">
+          <div className="note-view-switch" role="group" aria-label="Note view">
+            <button
+              className="view-button"
+              aria-pressed={!preview}
+              onClick={() => setPreview(false)}
+            >
+              <PencilLine size={14} />
+              <span>Edit</span>
+            </button>
+            <button
+              className="view-button"
+              aria-pressed={preview}
+              onClick={() => setPreview(true)}
+            >
+              <Eye size={14} />
+              <span>Read</span>
+            </button>
+          </div>
           <button
             className="view-button"
             title={favorite ? "Unpin note" : "Pin note"}
@@ -213,36 +234,44 @@ function NoteView({
           >
             <PanelRight size={15} />
           </button>
-          <button
-            className="view-button"
-            title="Open or create a drawing in this note"
-            onClick={() => setDrawing({})}
+          <MenuButton
+            className="note-tools-menu"
+            label="More note actions"
+            actions={[
+              {
+                id: "drawing",
+                label: "Open or create a drawing…",
+                icon: <PencilRuler size={15} />,
+                onSelect: () => setDrawing({}),
+              },
+              {
+                id: "formatting",
+                label: toolbar
+                  ? "Hide formatting toolbar"
+                  : "Show formatting toolbar",
+                icon: <Type size={15} />,
+                onSelect: toggleToolbar,
+              },
+              {
+                id: "rename",
+                label: "Rename or move note…",
+                icon: <PencilLine size={15} />,
+                separatorBefore: true,
+                onSelect: () => onRename(document),
+              },
+            ]}
           >
-            <PencilRuler size={15} />
-            <span>Drawing</span>
-          </button>
-          <button
-            className="view-button"
-            title="Toggle formatting toolbar"
-            aria-label="Toggle formatting toolbar"
-            aria-pressed={toolbar}
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={toggleToolbar}
-          >
-            <Type size={17} />
-          </button>
-          <button
-            className="view-button"
-            aria-pressed={preview}
-            onClick={() => setPreview((value) => !value)}
-          >
-            <Eye size={15} />
-            <span>{preview ? "Markdown" : "Preview"}</span>
-          </button>
+            <MoreHorizontal size={17} />
+          </MenuButton>
         </div>
       </div>
       {toolbar && <FormattingToolbar onFormat={format} />}
-      <div className="note-workarea">
+      {!snapshot.editable && (
+        <span role="status" className="muted">
+          Finishing file operation…
+        </span>
+      )}
+      <div className="note-workarea" inert={!snapshot.editable}>
         <div
           className="document-scroll"
           ref={scroll}
@@ -270,7 +299,9 @@ function NoteView({
               placeholder="Untitled"
               dir="auto"
               value={snapshot.title}
+              readOnly={!snapshot.editable}
               onChange={(event) =>
+                document.getSnapshot().editable &&
                 document.edit(withTitle(document.content, event.target.value))
               }
               onKeyDown={(event) => {
@@ -285,6 +316,7 @@ function NoteView({
                 <LivePreview
                   key={previewVersion}
                   document={document}
+                  editable={snapshot.editable}
                   externalVersion={snapshot.externalVersion}
                   editorRef={editor}
                   onLink={onLink}
@@ -295,6 +327,8 @@ function NoteView({
               <CodeEditor
                 ref={editor}
                 value={body}
+                editable={snapshot.editable}
+                canEdit={() => document.getSnapshot().editable}
                 note={{
                   workspaceId: document.workspaceId,
                   path: snapshot.path,

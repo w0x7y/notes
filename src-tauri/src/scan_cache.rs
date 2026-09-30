@@ -1,5 +1,6 @@
 //! A bounded cache of derived metadata. File contents and save revisions never use it.
 use crate::markdown::{first_h1, tags};
+use crate::pathing::read_regular_text;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -52,6 +53,15 @@ struct CachedNote {
 #[derive(Default)]
 pub(crate) struct ScanCache {
     entries: Mutex<HashMap<PathBuf, CachedNote>>,
+    #[cfg(test)]
+    pub(crate) read_pause: Mutex<Option<ReadPause>>,
+}
+
+#[cfg(test)]
+pub(crate) struct ReadPause {
+    pub path: PathBuf,
+    pub entered: std::sync::mpsc::Sender<()>,
+    pub resume: std::sync::mpsc::Receiver<()>,
 }
 
 impl ScanCache {
@@ -93,7 +103,22 @@ impl ScanCache {
         }
         // Disk I/O and Markdown parsing never run while a cache lock is held.
         // Failed reads must be retried, even if metadata has not changed.
-        let Ok(content) = fs::read_to_string(path) else {
+        #[cfg(test)]
+        {
+            let pause = {
+                let mut pending = self.read_pause.lock().unwrap();
+                if pending.as_ref().is_some_and(|pause| pause.path == path) {
+                    pending.take()
+                } else {
+                    None
+                }
+            };
+            if let Some(pause) = pause {
+                let _ = pause.entered.send(());
+                let _ = pause.resume.recv_timeout(std::time::Duration::from_secs(5));
+            }
+        }
+        let Ok(content) = read_regular_text(path) else {
             return (None, Vec::new());
         };
         let title = first_h1(&content);

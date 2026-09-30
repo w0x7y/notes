@@ -1,6 +1,16 @@
 import { z } from "zod";
 
+export const themeIds = [
+  "graphite-amber",
+  "ink-jade",
+  "midnight-ice",
+  "charcoal-coral",
+  "forest-moss",
+  "one-dark-pro",
+] as const;
+
 export const preferencesSchema = z.object({
+  theme: z.enum(themeIds).default("graphite-amber"),
   fontSize: z.number().int().min(12).max(24).default(15),
   lineHeight: z.number().min(1.3).max(2.2).default(1.9),
   editorFont: z.enum(["mono", "sans"]).default("mono"),

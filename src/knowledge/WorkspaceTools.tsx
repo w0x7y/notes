@@ -10,103 +10,50 @@ import {
   Ellipsis,
   Settings2,
   Network,
+  type LucideIcon,
 } from "lucide-react";
 import { MenuButton } from "../components/PopupMenu";
 import { openFile, useApp } from "../domain/app-store";
 import { useLibrary, toggleFavorite } from "./library";
+import type {
+  WorkspaceCommand,
+  WorkspaceCommandId,
+} from "../domain/workspace-commands";
 import "./knowledge.css";
-export type WorkspaceTool =
-  | "contents"
-  | "commands"
-  | "tasks"
-  | "projects"
-  | "capture"
-  | "daily"
-  | "templates"
-  | "graph";
+const toolIcons: Partial<Record<WorkspaceCommandId, LucideIcon>> = {
+  commands: Command,
+  contents: Search,
+  capture: Inbox,
+  daily: CalendarDays,
+  templates: FilePlus2,
+  graph: Network,
+  tasks: ListTodo,
+  projects: Columns3,
+  "workspace-settings": Settings2,
+};
+function ToolIcon({ id }: { id: WorkspaceCommandId }) {
+  const Icon = toolIcons[id] ?? Command;
+  return <Icon size={15} />;
+}
 export function WorkspaceTools({
-  onTool,
-  onSettings,
+  commands,
+  onCommand,
 }: {
-  onTool: (tool: WorkspaceTool) => void;
-  onSettings?: () => void;
+  commands: WorkspaceCommand[];
+  onCommand: (id: WorkspaceCommandId) => void;
 }) {
-  const workspaceId = useApp((state) => state.activeWorkspaceId);
   return (
     <MenuButton
       label="Workspace tools"
       className="workspace-tools-menu"
-      actions={[
-        {
-          id: "commands",
-          label: "Commands",
-          shortcut: "Ctrl K",
-          icon: <Command size={15} />,
-          onSelect: () => onTool("commands"),
-        },
-        {
-          id: "contents",
-          label: "Search contents",
-          shortcut: "Ctrl Shift P",
-          icon: <Search size={15} />,
-          onSelect: () => onTool("contents"),
-        },
-        {
-          id: "capture",
-          label: "Quick capture",
-          shortcut: "Ctrl Shift N",
-          separatorBefore: true,
-          icon: <Inbox size={15} />,
-          onSelect: () => onTool("capture"),
-        },
-        {
-          id: "daily",
-          label: "Today's note",
-          shortcut: "Ctrl Shift D",
-          icon: <CalendarDays size={15} />,
-          onSelect: () => onTool("daily"),
-        },
-        ...(workspaceId
-          ? [
-              {
-                id: "templates",
-                label: "New from template…",
-                icon: <FilePlus2 size={15} />,
-                onSelect: () => onTool("templates"),
-              },
-              {
-                id: "graph",
-                label: "Note graph",
-                icon: <Network size={15} />,
-                onSelect: () => onTool("graph"),
-              },
-              {
-                id: "tasks",
-                label: "Workspace tasks",
-                separatorBefore: true,
-                icon: <ListTodo size={15} />,
-                onSelect: () => onTool("tasks"),
-              },
-              {
-                id: "projects",
-                label: "Projects and assignments",
-                icon: <Columns3 size={15} />,
-                onSelect: () => onTool("projects"),
-              },
-            ]
-          : []),
-        ...(onSettings
-          ? [
-              {
-                id: "settings",
-                label: "Workspace settings…",
-                separatorBefore: true,
-                icon: <Settings2 size={15} />,
-                onSelect: onSettings,
-              },
-            ]
-          : []),
-      ]}
+      actions={commands.map((command) => ({
+        id: command.id,
+        label: command.tool?.label ?? command.label,
+        shortcut: command.shortcut,
+        separatorBefore: command.tool?.separatorBefore,
+        icon: <ToolIcon id={command.id} />,
+        onSelect: () => onCommand(command.id),
+      }))}
     >
       <Ellipsis size={17} />
     </MenuButton>

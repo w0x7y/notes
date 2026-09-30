@@ -12,7 +12,7 @@ import {
   type Tool,
   type Viewport,
 } from "./model";
-import { renderCanvas } from "./render";
+import { drawingSelectionColor, renderCanvas } from "./render";
 
 export type Style = {
   color: string;
@@ -44,6 +44,8 @@ export class DrawingController {
   private space = false;
   private pointer: number | null = null;
   private observer: ResizeObserver;
+  private themeObserver: MutationObserver;
+  private selectionColor: string;
   private abort = new AbortController();
 
   constructor(
@@ -76,11 +78,21 @@ export class DrawingController {
     );
     this.observer = new ResizeObserver(() => this.paint());
     this.observer.observe(canvas);
+    this.selectionColor = drawingSelectionColor(canvas);
+    this.themeObserver = new MutationObserver(() => {
+      this.selectionColor = drawingSelectionColor(canvas);
+      this.paint();
+    });
+    this.themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"],
+    });
     this.paint();
   }
   dispose() {
     this.abort.abort();
     this.observer.disconnect();
+    this.themeObserver.disconnect();
     cancelAnimationFrame(this.frame);
   }
   private screen(event: { clientX: number; clientY: number }): Point {
@@ -97,7 +109,13 @@ export class DrawingController {
           this.gesture?.kind === "create"
             ? [...shapes, this.draft]
             : shapes.map((s) => (s.id === this.draft?.id ? this.draft : s));
-      renderCanvas(this.canvas, shapes, this.view, this.selected);
+      renderCanvas(
+        this.canvas,
+        shapes,
+        this.view,
+        this.selected,
+        this.selectionColor,
+      );
     });
   }
   private publish() {

@@ -1,5 +1,6 @@
 import { useMemo, useSyncExternalStore } from "react";
-import { X } from "lucide-react";
+import { Link2, List, SlidersHorizontal, X } from "lucide-react";
+import { BrandMark } from "../components/BrandMark";
 import type { NoteDocument } from "../domain/document";
 import { navigateTo, useApp } from "../domain/app-store";
 import { resolveNoteLink } from "../domain/links";
@@ -50,15 +51,21 @@ export function NoteDetails({
   return (
     <aside className="note-details" aria-label="Note details">
       <div className="note-details-header">
-        <strong>Note details</strong>
+        <span className="note-details-heading">
+          <BrandMark size={18} />
+          <strong>Note details</strong>
+        </span>
         <button aria-label="Close note details" onClick={onClose}>
           <X size={15} />
         </button>
       </div>
       <section aria-label="Heading outline">
-        <h3>Outline</h3>
+        <h3>
+          <List size={14} />
+          Outline <span>{headings.length}</span>
+        </h3>
         {!headings.length && (
-          <p className="muted">Headings will appear here.</p>
+          <p className="muted">Add a heading to navigate your note here.</p>
         )}
         {headings.map((heading) => (
           <button
@@ -74,11 +81,15 @@ export function NoteDetails({
         ))}
       </section>
       <section aria-label="Note properties">
-        <h3>Properties</h3>
+        <h3>
+          <SlidersHorizontal size={14} />
+          Properties
+        </h3>
         <PropertiesFields document={document} />
       </section>
       <section aria-label="Backlinks">
         <h3>
+          <Link2 size={14} />
           Backlinks <span>{backlinks.length}</span>
         </h3>
         {loading && <p className="muted">Finding links…</p>}

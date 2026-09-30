@@ -1,10 +1,9 @@
 use crate::markdown::{rewrite_links, LinkRewrite};
 use crate::model::{Rewrite, Workspace};
-use crate::pathing::{normalized_relative, resolve};
+use crate::pathing::{normalized_relative, read_regular_text, resolve};
 use crate::service::{is_image, is_note, revision, workspace_entry};
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
-use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
@@ -183,7 +182,7 @@ pub(crate) fn rewrite_incoming(
         };
         // Recheck the boundary after enumeration and before either file operation.
         let content = match resolve(root, &path, false)
-            .and_then(|safe_path| fs::read_to_string(safe_path).map_err(|error| error.to_string()))
+            .and_then(|safe_path| read_regular_text(&safe_path).map_err(|error| error.to_string()))
         {
             Ok(content) => content,
             Err(error) => {
@@ -260,6 +259,7 @@ mod tests {
     use super::*;
     use crate::service::Service;
     use std::cell::RefCell;
+    use std::fs;
     use tempfile::tempdir;
 
     #[test]
