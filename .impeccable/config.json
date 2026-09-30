@@ -1,0 +1,20 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "design-system-font",
+        "value": "adwaita",
+        "createdAt": "2026-09-30T15:12:31.317Z",
+        "reason": "Agent decision: Adwaita is an alias for the Adwaita Sans family already documented in DESIGN.md."
+      },
+      {
+        "rule": "design-system-font",
+        "value": "dejavu sans mono",
+        "createdAt": "2026-09-30T15:43:56.793Z",
+        "reason": "Agent decision: false positive; DESIGN.md Typography explicitly names DejaVu Sans Mono as the editor fallback. The film uses that existing documented font for Markdown text."
+      }
+    ]
+  }
+}
