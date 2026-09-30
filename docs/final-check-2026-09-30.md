@@ -16,6 +16,11 @@ Updated maintained workflow, drawing, native-contract and design documentation. 
 
 ## Remaining dependency findings
 
+Historical findings from this review. A later change on 2026-09-30 backported
+the GLib fix and replaced the macro helper. See the current
+[dependency backport notes](../src-tauri/vendor/README.md) for implementation,
+verification and maintenance requirements.
+
 1. **Informational unsoundness: `glib 0.18.5`.** RustSec identifies unsafe iterator behavior in `VariantStrIter`, patched in ≥0.20. GTK 0.18.2 requires glib 0.18. No direct application use of that iterator or demonstrated application exploit was found; this does not prove the dependency is unreachable. Next action: adopt an upstream Tauri/GTK migration when compatible. [RustSec RUSTSEC-2024-0429](https://rustsec.org/advisories/RUSTSEC-2024-0429.html).
 2. **Informational maintenance: `proc-macro-error 1.0.4`.** Inherited through GTK/glib macros; RustSec lists no patched version. Next action: track upstream macro/dependency replacement. [RustSec RUSTSEC-2024-0370](https://rustsec.org/advisories/RUSTSEC-2024-0370.html).
 

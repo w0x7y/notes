@@ -80,6 +80,25 @@ cargo test
 cargo clippy --all-targets -- -D warnings
 ```
 
+Native dependency checks, from the repository root:
+
+```sh
+python3 scripts/check-native-dependencies.py
+cargo audit --file src-tauri/Cargo.lock --deny warnings
+cargo test --manifest-path src-tauri/Cargo.toml --locked --release --test glib_variant_iter
+```
+
+Install `cargo-audit` with `cargo install cargo-audit --locked` if needed. The
+[GTK 3 backport notes](src-tauri/vendor/README.md) document the GLib unsoundness
+fix, replacement of the unmaintained macro helper, local patch ownership and
+why an audit alone does not verify vendored code.
+
+Dependency repair on 2026-09-30: the optimized GLib iterator regression crashed
+with the original dependency and passed with the backport. All 71 native tests,
+strict Clippy, the vendor integrity check and Cargo audit with warnings denied
+passed. The desktop release was rebuilt. The three local patches must be
+maintained until the upstream GTK stack can replace them.
+
 Final check on 2026-09-30: 228 frontend tests passed with one existing opt-in performance test skipped; all 70 native tests passed. TypeScript, strict Clippy, Rust formatting, drawing bundle guard, whitespace checks and the desktop release rebuild passed. Repairs cover late refresh after workspace removal, drawing export during shutdown, narrow-pane properties, special-file native reads and editor attribution. Browser demo checks verified all six themes, tab/workspace feedback, details fields and deferred drawing export. The [final-check report](docs/final-check-2026-09-30.md) records coverage, security checks, two remaining upstream dependency advisories and verification limits.
 
 Earlier session, command and document lifetime verification on 2026-09-30: 223 frontend tests passed with one existing opt-in performance test skipped; all 68 native tests passed. TypeScript, strict Clippy, diff checks and the desktop release build passed. Independent reviews covered session invariants, registration/removal ordering, close/load races, pending shutdown workflows, terminal disposal and editor holds. Browser demo checks verified keyboard and middle-click property draft saving, palette autofocus/split, tab cycling, lone secondary promotion, Capture/Today across sidebar, Tools and keyboard, busy/drawing command restrictions, drawing text committed by Save, and editing restored after failed deletion. Native file behavior remains covered by temporary-file Rust tests; browser checks use demo files.
