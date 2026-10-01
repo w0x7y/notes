@@ -25,6 +25,7 @@ async function call<T>(
 
 export const nativeFiles: FileService = {
   kind: "native",
+  listFonts: () => call("list_fonts", {}, z.array(z.string())),
   ensureCaptureWorkspace: () =>
     call("ensure_capture_workspace", {}, snapshotSchema),
   writeDrawingSvg: (workspaceId, svg) =>

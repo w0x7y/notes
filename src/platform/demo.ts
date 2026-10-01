@@ -146,6 +146,15 @@ export function createDemoFiles(): FileService {
   });
   return {
     kind: "demo",
+    // Representative choices only. Browsers cannot enumerate local fonts without permission.
+    listFonts: async () => [
+      "Adwaita Sans",
+      "DejaVu Sans",
+      "DejaVu Sans Mono",
+      "DejaVu Serif",
+      "JetBrains Mono",
+      "Noto Sans Hebrew",
+    ],
     ensureCaptureWorkspace: async () => {
       const id = "quick-notes";
       if (!settings.workspaces.some((item) => item.id === id)) {

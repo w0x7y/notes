@@ -2,6 +2,7 @@ import { expect, it } from "vitest";
 import {
   defaultPreferences,
   editorFontFamily,
+  uiFontFamily,
   preferencesSchema,
 } from "./preferences";
 import { settingsSchema } from "./contracts";
@@ -21,6 +22,30 @@ it("defaults missing themes while preserving legacy preferences and settings", (
   });
   expect(settings.toolbarVisible).toBe(false);
   expect(defaultPreferences).toHaveProperty("theme", "graphite-amber");
+});
+
+it("keeps UI and editor fonts independent and defaults old settings", () => {
+  const legacy = preferencesSchema.parse({ customFont: "JetBrains Mono" });
+  expect(legacy.uiFont).toBe("");
+  expect(uiFontFamily(legacy)).toBe("var(--font-sans)");
+  const saved = preferencesSchema.parse({ ...legacy, uiFont: "  Noto Sans  " });
+  expect(uiFontFamily(saved)).toBe('"Noto Sans", var(--font-sans)');
+  expect(editorFontFamily(saved)).toBe('"JetBrains Mono", var(--font-mono)');
+  expect(preferencesSchema.parse(JSON.parse(JSON.stringify(saved)))).toEqual(
+    saved,
+  );
+  for (const uiFont of ["Bad\nFont", "Bad\u007fFont"])
+    expect(preferencesSchema.safeParse({ uiFont }).success).toBe(false);
+});
+
+it("saves installed families longer than the old free-text limit", () => {
+  const family = "Long installed family ".repeat(8);
+  const preferences = preferencesSchema.parse({
+    customFont: family,
+    uiFont: family,
+  });
+  expect(preferences.customFont).toBe(family.trim());
+  expect(preferences.uiFont).toBe(family.trim());
 });
 
 it.each([
@@ -106,7 +131,6 @@ it("accepts installed font names and bounds typography values", () => {
     editorFontFamily({ ...preferences, customFont: 'A "quoted" font' }),
   ).toBe('"A \\"quoted\\" font", var(--font-mono)');
   for (const input of [
-    { customFont: "a".repeat(101) },
     { customFont: "name\nother" },
     { fontWeight: 450 },
     { fontWeight: 800 },

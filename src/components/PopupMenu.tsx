@@ -13,6 +13,7 @@ export type MenuAction = {
   shortcut?: string;
   separatorBefore?: boolean;
   color?: string;
+  fontFamily?: string;
   icon?: ReactNode;
   selected?: boolean;
   danger?: boolean;
@@ -30,11 +31,13 @@ export function PopupMenu({
   actions,
   anchor,
   onClose,
+  className = "",
 }: {
   label: string;
   actions: MenuAction[];
   anchor: MenuAnchor;
   onClose: () => void;
+  className?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const close = useRef(onClose);
@@ -51,10 +54,11 @@ export function PopupMenu({
     const box = menu.getBoundingClientRect();
     menu.style.left = `${Math.max(6, Math.min(anchor.x, window.innerWidth - box.width - 6))}px`;
     menu.style.top = `${Math.max(6, Math.min(anchor.y, window.innerHeight - box.height - 6))}px`;
-    (
+    const selected =
       menu.querySelector<HTMLButtonElement>('[aria-checked="true"]') ??
-      menu.querySelector<HTMLButtonElement>("button")
-    )?.focus({ preventScroll: true });
+      menu.querySelector<HTMLButtonElement>("button");
+    selected?.focus({ preventScroll: true });
+    selected?.scrollIntoView({ block: "nearest" });
     const outside = (event: PointerEvent) => {
       if (
         event.target instanceof Node &&
@@ -77,7 +81,7 @@ export function PopupMenu({
     <div
       ref={ref}
       popover="manual"
-      className="popup-menu"
+      className={`popup-menu ${className}`}
       role="menu"
       aria-label={label}
       style={{ left: anchor.x, top: anchor.y, minWidth: anchor.width }}
@@ -127,7 +131,11 @@ export function PopupMenu({
             }}
           >
             {action.icon}
-            <span style={{ color: action.color }}>{action.label}</span>
+            <span
+              style={{ color: action.color, fontFamily: action.fontFamily }}
+            >
+              {action.label}
+            </span>
             {action.shortcut && (
               <kbd className="menu-shortcut">{action.shortcut}</kbd>
             )}
@@ -144,11 +152,15 @@ export function MenuButton({
   children,
   actions,
   className = "",
+  disabled = false,
+  menuClassName,
 }: {
   label: string;
   children: ReactNode;
   actions: MenuAction[];
   className?: string;
+  disabled?: boolean;
+  menuClassName?: string;
 }) {
   const [anchor, setAnchor] = useState<MenuAnchor | null>(null);
   return (
@@ -156,6 +168,7 @@ export function MenuButton({
       <button
         type="button"
         className="menu-trigger"
+        disabled={disabled}
         aria-label={label}
         title={label}
         aria-haspopup="menu"
@@ -189,6 +202,7 @@ export function MenuButton({
       {anchor && (
         <PopupMenu
           label={label}
+          className={menuClassName}
           actions={actions}
           anchor={anchor}
           onClose={() => setAnchor(null)}

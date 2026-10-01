@@ -1,4 +1,5 @@
 mod drawing;
+mod fonts;
 mod incoming_links;
 pub mod markdown;
 pub mod model;
@@ -28,6 +29,10 @@ async fn work<T: Send + 'static>(
 #[tauri::command]
 async fn load_settings(service: tauri::State<'_, Arc<Service>>) -> Result<Settings, String> {
     work(service, |s| s.load_settings()).await
+}
+#[tauri::command]
+async fn list_fonts(service: tauri::State<'_, Arc<Service>>) -> Result<Vec<String>, String> {
+    work(service, |s| s.list_fonts()).await
 }
 #[tauri::command]
 async fn ensure_capture_workspace(
@@ -227,6 +232,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             load_settings,
+            list_fonts,
             ensure_capture_workspace,
             write_drawing_svg,
             save_preferences,

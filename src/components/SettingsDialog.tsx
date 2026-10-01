@@ -1,7 +1,8 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   defaultPreferences,
   editorFontFamily,
+  uiFontFamily,
   type Preferences,
 } from "../domain/preferences";
 import { savePreferences, useApp } from "../domain/app-store";
@@ -12,6 +13,8 @@ import "./settings.css";
 import { BundlingPreview } from "../knowledge/BundlingPreview";
 import "../knowledge/graph.css";
 import { ThemePicker } from "../theme/ThemePicker";
+import { FontPicker } from "./FontPicker";
+import { files } from "../platform";
 
 type Section =
   | "Appearance"
@@ -108,6 +111,29 @@ export function SettingsDialog({
   const [section, setSection] = useState<Section>(initialSection);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fonts, setFonts] = useState<string[]>([]);
+  const [fontsLoading, setFontsLoading] = useState(true);
+  const [fontError, setFontError] = useState<string | null>(null);
+  const [fontAttempt, setFontAttempt] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    setFontsLoading(true);
+    setFontError(null);
+    void files
+      .listFonts()
+      .then((families) => {
+        if (!cancelled) setFonts(families);
+      })
+      .catch((reason) => {
+        if (!cancelled) setFontError(errorMessage(reason));
+      })
+      .finally(() => {
+        if (!cancelled) setFontsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [fontAttempt]);
   const update = <K extends keyof Preferences>(key: K, value: Preferences[K]) =>
     setDraft((current) => ({ ...current, [key]: value }));
   const toggle = (
@@ -172,9 +198,52 @@ export function SettingsDialog({
             ))}
           </nav>
           <div className="settings-content" aria-label={`${section} settings`}>
+            {(section === "Appearance" || section === "Editor") && (
+              <>
+                {files.kind === "demo" && (
+                  <p className="settings-note">
+                    Browser demo shows sample font choices. The desktop app
+                    lists all installed fonts.
+                  </p>
+                )}
+                {fontError && (
+                  <p className="settings-note" role="alert">
+                    Could not load installed fonts. {fontError}{" "}
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => setFontAttempt((attempt) => attempt + 1)}
+                    >
+                      Retry
+                    </button>
+                  </p>
+                )}
+              </>
+            )}
             {section === "Appearance" && (
               <>
                 <h3>Appearance</h3>
+                <Row
+                  label="UI font family"
+                  hint="Applies to navigation, menus, and dialogs."
+                >
+                  <FontPicker
+                    label="UI font family"
+                    value={draft.uiFont}
+                    families={fonts}
+                    fallback="sans"
+                    loading={fontsLoading}
+                    onChange={(value) => update("uiFont", value)}
+                  />
+                </Row>
+                <div
+                  className="settings-font-preview"
+                  aria-label="UI font preview"
+                  style={{ fontFamily: uiFontFamily(draft) }}
+                >
+                  <p dir="auto">Notes · Search · Settings · 0123456789</p>
+                  <p dir="auto">English ועברית ביחד</p>
+                </div>
                 <p className="theme-intro">
                   Choose the colors for your workspace. Graphite + amber is the
                   Notes signature.
@@ -225,33 +294,16 @@ export function SettingsDialog({
                   </div>
                 </Row>
                 <Row
-                  label="Font family"
-                  hint="Applies to note text. Navigation and dialogs use a separate sans serif font."
+                  label="Editor font family"
+                  hint="Applies to note text in Edit and Read."
                 >
-                  <Choice
-                    label="Font family"
-                    value={draft.editorFont}
-                    options={[
-                      { value: "mono", label: "Monospace" },
-                      { value: "sans", label: "Sans serif" },
-                    ]}
-                    onChange={(value) => update("editorFont", value)}
-                  />
-                </Row>
-                <Row
-                  label="Custom font family"
-                  hint="Enter an installed font name, such as JetBrains Mono. Leave blank to use the font above. Missing fonts fall back automatically."
-                >
-                  <input
-                    className="setting-text"
-                    aria-label="Custom font family"
-                    placeholder="e.g. Noto Sans Hebrew"
-                    maxLength={100}
-                    spellCheck={false}
+                  <FontPicker
+                    label="Editor font family"
                     value={draft.customFont}
-                    onChange={(event) =>
-                      update("customFont", event.target.value)
-                    }
+                    families={fonts}
+                    fallback={draft.editorFont}
+                    loading={fontsLoading}
+                    onChange={(value) => update("customFont", value)}
                   />
                 </Row>
                 <Row label="Font weight">

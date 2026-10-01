@@ -17,10 +17,14 @@ export const preferencesSchema = z.object({
   customFont: z
     .string()
     .trim()
-    .max(100)
     .regex(/^[^\u0000-\u001f\u007f]*$/)
     .default(""),
   fontWeight: z.number().int().min(300).max(700).multipleOf(100).default(400),
+  uiFont: z
+    .string()
+    .trim()
+    .regex(/^[^\u0000-\u001f\u007f]*$/)
+    .default(""),
   letterSpacing: z.number().min(-0.5).max(3).default(0),
   lineWrapping: z.boolean().default(true),
   lineNumbers: z.boolean().default(false),
@@ -46,7 +50,13 @@ export function editorFontFamily(
 ): string {
   const fallback =
     preferences.editorFont === "mono" ? "var(--font-mono)" : "var(--font-sans)";
-  // Treat the entered family as one CSS string, including names with punctuation.
+  // Treat the selected family as one CSS string, including names with punctuation.
   const custom = preferences.customFont.trim();
   return custom ? `${JSON.stringify(custom)}, ${fallback}` : fallback;
+}
+
+export function uiFontFamily(preferences: Pick<Preferences, "uiFont">): string {
+  return preferences.uiFont
+    ? `${JSON.stringify(preferences.uiFont)}, var(--font-sans)`
+    : "var(--font-sans)";
 }

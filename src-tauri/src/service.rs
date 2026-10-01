@@ -175,6 +175,10 @@ fn key(id: &str, path: &str) -> String {
 }
 
 impl Service {
+    pub fn list_fonts(&self) -> Result<Vec<String>, String> {
+        crate::fonts::list_families()
+    }
+
     pub fn new(config_dir: PathBuf) -> Result<Self, String> {
         Self::with_trash(config_dir, Arc::new(DesktopTrash))
     }

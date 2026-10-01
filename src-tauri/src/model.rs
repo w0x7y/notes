@@ -126,6 +126,7 @@ pub struct Preferences {
     pub line_height: f64,
     pub editor_font: EditorFont,
     pub custom_font: String,
+    pub ui_font: String,
     pub font_weight: u16,
     pub letter_spacing: f64,
     pub line_wrapping: bool,
@@ -153,6 +154,7 @@ impl Default for Preferences {
             line_height: 1.9,
             editor_font: EditorFont::Mono,
             custom_font: String::new(),
+            ui_font: String::new(),
             font_weight: 400,
             letter_spacing: 0.0,
             line_wrapping: true,
@@ -179,15 +181,11 @@ impl Preferences {
         if !self.graph_bundling.is_finite() || !(0.0..=1.0).contains(&self.graph_bundling) {
             return Err("Graph bundling strength must be between 0 and 1".into());
         }
-        if self.custom_font.encode_utf16().count() > 100
-            || self
-                .custom_font
-                .chars()
-                .any(|c| c <= '\u{001f}' || c == '\u{007f}')
+        if [&self.custom_font, &self.ui_font]
+            .iter()
+            .any(|name| name.chars().any(|c| c <= '\u{001f}' || c == '\u{007f}'))
         {
-            return Err(
-                "Font name must be at most 100 characters without control characters".into(),
-            );
+            return Err("Font names must not contain control characters".into());
         }
         if !(300..=700).contains(&self.font_weight) || !self.font_weight.is_multiple_of(100) {
             return Err("Font weight must be 300, 400, 500, 600, or 700".into());

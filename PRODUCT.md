@@ -37,7 +37,7 @@ A student and developer replacing their Obsidian workflow with a focused, keyboa
 - Autosave indicates saving, saved, or failed, and retains unsaved changes after failure.
 - Existing image references render inline. Image files open in zoomable tabs and split panes. No clipboard image insertion or drag-and-drop insertion in v1.
 - Cross-workspace search results switch to the destination workspace. App-initiated moves and renames update incoming links within registered workspaces.
-- Six persisted dark themes: Graphite + amber by default, Ink + jade, Midnight + ice, Charcoal + coral, Forest + moss, and the original One Dark Pro. Appearance settings preview a draft locally and apply it after Save changes. Navigation typography stays proportional independently of editor preferences.
+- Six persisted dark themes: Graphite + amber by default, Ink + jade, Midnight + ice, Charcoal + coral, Forest + moss, and the original One Dark Pro. Appearance settings preview a draft locally and apply it after Save changes. Separate UI and editor font dropdowns list installed Linux font families, with each choice previewed in its own typeface. Font discovery runs when settings opens; selections preview locally and apply on Save changes. UI typography remains independent of editor preferences.
 - Standard keyboard shortcuts in v1; Vim mode may come later.
 
 ## Current visual direction

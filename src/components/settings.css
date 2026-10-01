@@ -96,15 +96,31 @@
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
-.setting-text {
-  width: 190px;
+.setting-row .font-picker {
+  width: 210px;
   min-width: 0;
-  flex-shrink: 0;
-  padding: 7px 8px;
-  border: 1px solid var(--border);
-  border-radius: 3px;
+  flex: 0 0 210px;
+  max-width: 100%;
+}
+.font-picker .menu-trigger {
   background: var(--sidebar);
-  color: var(--bright);
+  border: 1px solid var(--border);
+}
+.font-picker .menu-trigger:hover {
+  background: var(--hover);
+}
+.font-picker .menu-trigger:focus-visible {
+  background: var(--selection);
+}
+.font-picker .menu-trigger-label,
+.font-picker .menu-trigger-label > span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.font-picker-menu {
+  max-height: min(360px, calc(100vh - 12px));
 }
 .settings-font-preview {
   margin: 14px 0;

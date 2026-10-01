@@ -1618,7 +1618,7 @@ fn old_settings_receive_complete_preference_defaults() {
             "currentWorkspaceFirst":true,"searchLimit":60,"restoreSession":true,
             "refreshOnFocus":true,"sortFilesBy":"name",
             "customFont":"","fontWeight":400,"letterSpacing":0.0,"noteWidth":940,
-            "graphBundling":0.85,"theme":"graphite-amber"
+            "graphBundling":0.85,"theme":"graphite-amber","uiFont":""
         })
     );
 }
@@ -1751,12 +1751,16 @@ fn preferences_persist_and_missing_fields_use_defaults() {
         "fontSize":24,"lineHeight":2.2,"editorFont":"sans","tabSize":8,
         "autosaveDelayMs":5000,"searchScope":"current","searchLimit":200,
         "sortFilesBy":"modified","refreshOnFocus":false,
-        "customFont":"Noto Sans Hebrew","fontWeight":500,"letterSpacing":0.3,"noteWidth":1200
+        "customFont":"Noto Sans Hebrew","uiFont":"DejaVu Sans","fontWeight":500,"letterSpacing":0.3,"noteWidth":1200
     }))
     .unwrap();
     assert!(preferences.line_wrapping);
     assert!(preferences.restore_session);
     assert_eq!(preferences.graph_bundling, 0.85);
+    assert_eq!(
+        serde_json::to_value(&preferences).unwrap()["uiFont"],
+        "DejaVu Sans"
+    );
     assert_eq!(
         service.save_preferences(preferences.clone()).unwrap(),
         preferences
@@ -1764,6 +1768,62 @@ fn preferences_persist_and_missing_fields_use_defaults() {
     drop(service);
     let restarted = Service::new(config.path().to_path_buf()).unwrap();
     assert_eq!(restarted.load_settings().unwrap().preferences, preferences);
+}
+
+#[test]
+fn invalid_ui_fonts_leave_preferences_unchanged() {
+    let (_config, service) = service();
+    for name in ["Bad\nFont", "Bad\u{007f}Font"] {
+        let preferences = serde_json::from_value(serde_json::json!({"uiFont":name})).unwrap();
+        assert!(service.save_preferences(preferences).is_err());
+    }
+    assert_eq!(
+        service.load_settings().unwrap().preferences,
+        notes_lib::model::Preferences::default()
+    );
+}
+
+#[test]
+fn long_installed_font_names_persist() {
+    let (config, service) = service();
+    let family = "Long installed family ".repeat(8);
+    let preferences: notes_lib::model::Preferences =
+        serde_json::from_value(serde_json::json!({"customFont":family,"uiFont":family})).unwrap();
+    service.save_preferences(preferences.clone()).unwrap();
+    let restarted = Service::new(config.path().to_path_buf()).unwrap();
+    assert_eq!(restarted.load_settings().unwrap().preferences, preferences);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn installed_font_families_match_fontconfig_and_do_not_change_settings() {
+    let (_config, service) = service();
+    let before = serde_json::to_value(service.load_settings().unwrap()).unwrap();
+    let families = service.list_fonts().unwrap();
+    assert!(families.windows(2).all(|pair| pair[0] < pair[1]));
+    assert!(families.iter().all(|name| !name.is_empty()));
+    // fc-list is optional at runtime; when present it independently checks that
+    // the native service includes each family returned by Fontconfig's CLI.
+    if let Ok(output) = std::process::Command::new("fc-list")
+        .args(["--format", "%{family}\\n"])
+        .output()
+    {
+        assert!(output.status.success());
+        for name in String::from_utf8(output.stdout)
+            .unwrap()
+            .lines()
+            .flat_map(|line| line.split(','))
+        {
+            assert!(
+                families.iter().any(|family| family == name.trim()),
+                "Missing font: {name}"
+            );
+        }
+    }
+    assert_eq!(
+        serde_json::to_value(service.load_settings().unwrap()).unwrap(),
+        before
+    );
 }
 
 #[test]
@@ -1853,7 +1913,7 @@ fn invalid_preferences_never_replace_saved_or_in_memory_values() {
             })
             .is_err());
     }
-    for custom_font in ["a".repeat(101), "Bad\nFont".to_string()] {
+    for custom_font in ["Bad\nFont".to_string(), "Bad\u{007f}Font".to_string()] {
         assert!(service
             .save_preferences(Preferences {
                 custom_font,

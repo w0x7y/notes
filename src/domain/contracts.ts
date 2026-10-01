@@ -100,6 +100,7 @@ export const moveFolderSchema = z.object({
 
 export interface FileService {
   readonly kind: "native" | "demo";
+  listFonts(): Promise<string[]>;
   loadSettings(): Promise<Settings>;
   savePreferences(preferences: Preferences): Promise<Preferences>;
   saveSessions(
