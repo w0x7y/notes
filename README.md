@@ -69,6 +69,22 @@ On NVIDIA/Wayland, startup applies `__NV_DISABLE_EXPLICIT_SYNC=1` unless explici
 | Ctrl+Z / Ctrl+Shift+Z | Undo / redo in the editor |
 | ↑ / ↓, Enter, Escape | Navigate, open, and close search |
 
+## Agent context with Graft
+
+The repo includes the Graft skill for Codex and Claude Code, agent instructions,
+MCP configuration, and Claude Code hooks. Install the CLI and build the local
+code graph after cloning:
+
+```sh
+npm install --global @nanonets/graft@0.21.1
+graft build
+graft check
+```
+
+Restart the agent to load the skill and MCP configuration. The generated `graft/`
+cache is ignored by Git. The structural graph needs no API key; optional LLM
+summaries require a separate `graft build --deep` run.
+
 ## Validation
 
 ```sh
