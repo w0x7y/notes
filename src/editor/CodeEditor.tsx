@@ -1,4 +1,10 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+} from "react";
 import {
   Annotation,
   Compartment,
@@ -9,6 +15,9 @@ import {
   Decoration,
   EditorView,
   ViewPlugin,
+  drawSelection,
+  rectangularSelection,
+  placeholder,
   keymap,
   type DecorationSet,
   type ViewUpdate,
@@ -20,6 +29,11 @@ import {
   indentWithTab,
 } from "@codemirror/commands";
 import { autocompletion, completionKeymap } from "@codemirror/autocomplete";
+import {
+  highlightSelectionMatches,
+  search,
+  searchKeymap,
+} from "@codemirror/search";
 import { noteCompletions } from "./completions";
 import { searchEntries } from "../domain/app-store";
 import { bracketMatching, syntaxTree } from "@codemirror/language";
@@ -27,7 +41,7 @@ import { markdown } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
 import { editorTheme } from "./theme";
 import { useShallow } from "zustand/react/shallow";
-import { useApp } from "../domain/app-store";
+import { showError, useApp } from "../domain/app-store";
 import {
   editorPreferenceExtensions,
   selectEditorPreferences,
@@ -172,7 +186,9 @@ export const CodeEditor = forwardRef<EditorHandle, Props>(
     const host = useRef<HTMLDivElement>(null);
     const editor = useRef<EditorView | null>(null);
     const handlers = useRef(props);
-    handlers.current = props;
+    useLayoutEffect(() => {
+      handlers.current = props;
+    });
     useImperativeHandle(
       ref,
       () => ({
@@ -199,6 +215,14 @@ export const CodeEditor = forwardRef<EditorHandle, Props>(
       const initial = handlers.current;
       const extensions: Extension[] = [
         history(),
+        search({ top: true }),
+        highlightSelectionMatches(),
+        EditorState.allowMultipleSelections.of(true),
+        drawSelection(),
+        rectangularSelection(),
+        placeholder(
+          "Write Markdown. Type / for commands or [[ to link a note.",
+        ),
         bracketMatching(),
         markdown({ codeLanguages: languages }),
         editorTheme,
@@ -242,6 +266,7 @@ export const CodeEditor = forwardRef<EditorHandle, Props>(
         }),
         keymap.of([
           ...completionKeymap,
+          ...searchKeymap,
           {
             key: "Mod-b",
             run: (view) => {
@@ -285,6 +310,9 @@ export const CodeEditor = forwardRef<EditorHandle, Props>(
               )
             ) {
               event.preventDefault();
+              showError(
+                "Image paste is not supported yet. Save the image in your workspace and insert a Markdown image link.",
+              );
               return true;
             }
             return false;
@@ -292,6 +320,9 @@ export const CodeEditor = forwardRef<EditorHandle, Props>(
           drop: (event) => {
             if (event.dataTransfer?.files.length) {
               event.preventDefault();
+              showError(
+                "File drop is not supported yet. Save the file in your workspace and insert a Markdown link.",
+              );
               return true;
             }
             return false;

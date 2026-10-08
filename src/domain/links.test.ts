@@ -13,6 +13,58 @@ const entries = {
   school: [note("Topic.md"), note("Lectures/Topic.md")],
   project: [note("Topic.md"), note("Other note.md")],
 };
+
+it("resolves aliases and titles with deterministic path precedence and ambiguity", () => {
+  const files = {
+    school: [
+      {
+        ...note("Folder/Real.md"),
+        title: "Shown title",
+        aliases: ["כינוי", "Shared", "Shared"],
+      },
+      { ...note("Other.md"), title: "Other", aliases: ["Shared", "Real"] },
+      { ...note("Shown title.md"), title: "Exact path" },
+    ],
+    project: [{ ...note("Project.md"), aliases: ["כינוי", "Remote name"] }],
+  };
+  for (const resolve of [
+    createNoteLinkResolver(files),
+    (target: string, id: string, source: string) =>
+      resolveNoteLink(target, id, source, files),
+  ]) {
+    expect(resolve("כינוי", "school", "Source.md")).toEqual({
+      kind: "found",
+      workspaceId: "school",
+      path: "Folder/Real.md",
+    });
+    expect(resolve("Shared", "school", "Source.md")).toEqual({
+      kind: "ambiguous",
+    });
+    expect(resolve("Real", "school", "Source.md")).toEqual({
+      kind: "found",
+      workspaceId: "school",
+      path: "Folder/Real.md",
+    });
+    expect(resolve("Shown title", "school", "Source.md")).toEqual({
+      kind: "found",
+      workspaceId: "school",
+      path: "Shown title.md",
+    });
+    expect(resolve("project:כינוי", "school", "Source.md")).toEqual({
+      kind: "found",
+      workspaceId: "project",
+      path: "Project.md",
+    });
+    expect(resolve("/כינוי", "school", "Source.md")).toEqual({
+      kind: "missing",
+    });
+    expect(resolve("Remote name", "school", "Source.md")).toEqual({
+      kind: "found",
+      workspaceId: "project",
+      path: "Project.md",
+    });
+  }
+});
 it("indexes paths and basenames while retaining local preference, ambiguity and first-match rules", () => {
   const all = {
     ...entries,

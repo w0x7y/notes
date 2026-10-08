@@ -1,5 +1,11 @@
 import { WorkspaceTools, PinnedNotes } from "../knowledge/WorkspaceTools";
-import { useMemo, useState, type DragEvent, type MouseEvent } from "react";
+import {
+  memo,
+  useMemo,
+  useState,
+  type DragEvent,
+  type MouseEvent,
+} from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -229,7 +235,7 @@ function FolderBranch(
   );
 }
 
-export function Sidebar(props: Props) {
+export const Sidebar = memo(function Sidebar(props: Props) {
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [context, setContext] = useState<{
     entry: Entry;
@@ -498,4 +504,4 @@ export function Sidebar(props: Props) {
       </button>
     </aside>
   );
-}
+});

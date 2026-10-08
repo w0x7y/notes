@@ -1,6 +1,11 @@
 import MarkdownIt from "markdown-it";
 import type { SearchEntry } from "../domain/contracts";
-import { splitNote } from "../domain/notes";
+import {
+  extractAliases,
+  extractTags,
+  noteTitle,
+  splitNote,
+} from "../domain/notes";
 import { readProperties } from "./properties";
 const parser = new MarkdownIt();
 // Wiki tokens participate in parsing so examples in inline/fenced code stay excluded.
@@ -118,6 +123,9 @@ export function analyzeNote(entry: SearchEntry, content: string): IndexedNote {
   }
   return {
     ...entry,
+    title: noteTitle(entry.path, content),
+    tags: extractTags(content),
+    aliases: extractAliases(content),
     content,
     headings,
     tasks,

@@ -702,7 +702,7 @@ it("remaps folder selection and heading navigation together with document paths"
 it("uses the reconciled source for overlapping queued folder moves and carries its pins", async () => {
   const app = await import("./app-store");
   const { files } = await import("../platform");
-  const { toggleFavorite, useLibrary } = await import("../knowledge/library");
+  const { toggleFavorite, useLibrary } = await import("./library");
   await app.initialize();
   const document = await app.loadDocument("algebra", "Lectures/Eigenvalues.md");
   toggleFavorite("algebra", "Lectures/Eigenvalues.md");
@@ -772,7 +772,7 @@ it("preserves newer incoming-link edits instead of overwriting a committed rewri
   await moving;
   expect(document.content).toContain("Newer typing.");
   expect(document.dirty).toBe(true);
-  expect(document.getSnapshot().status.kind).toBe("failed");
+  expect(document.getSnapshot().status.kind).toBe("conflict");
   expect(
     (await files.readNote("algebra", "Practice problems.md")).content,
   ).toBe("# Practice\n\n![diagram](Renamed.svg)");
@@ -935,20 +935,6 @@ it("applies preferences only after successful persistence and can disable sessio
   await app.savePreferences({ ...current, restoreSession: false });
   await app.initialize();
   expect(app.useApp.getState().sessions).toEqual({});
-});
-
-it("coalesces concurrent refreshes and preserves the file index when nothing changed", async () => {
-  const app = await import("./app-store");
-  const { files } = await import("../platform");
-  await app.initialize();
-  const entries = app.useApp.getState().entries.algebra;
-  const scan = vi.spyOn(files, "scanWorkspace");
-  await Promise.all([
-    app.refreshWorkspace("algebra"),
-    app.refreshWorkspace("algebra"),
-  ]);
-  expect(scan).toHaveBeenCalledTimes(1);
-  expect(app.useApp.getState().entries.algebra).toBe(entries);
 });
 
 it("ignores a refresh read that finishes after workspace removal", async () => {
@@ -1118,7 +1104,7 @@ it("refreshes a new registration without joining the removed registration's pend
 it("deletes a folder after saving descendants and clears only its tree state", async () => {
   const app = await import("./app-store");
   const { files } = await import("../platform");
-  const { toggleFavorite, useLibrary } = await import("../knowledge/library");
+  const { toggleFavorite, useLibrary } = await import("./library");
   await app.initialize();
   const document = await app.loadDocument("algebra", "Lectures/Eigenvalues.md");
   const outside = await app.loadDocument("algebra", "Practice problems.md");
@@ -1305,4 +1291,272 @@ it("allows loading the remaining pane as soon as deleted folder tabs disappear",
   } finally {
     unsubscribe();
   }
+});
+
+it("coalesces overlapping startup requests instead of loading settings twice", async () => {
+  const app = await import("./app-store");
+  const { files } = await import("../platform");
+  const load = vi.spyOn(files, "loadSettings");
+  const scan = vi.spyOn(files, "scanWorkspace");
+  const first = app.initialize();
+  const second = app.initialize();
+  expect(second).toBe(first);
+  await Promise.all([first, second]);
+  expect(load).toHaveBeenCalledTimes(1);
+  expect(scan).toHaveBeenCalledTimes(app.useApp.getState().workspaces.length);
+});
+
+it("keeps autosave metadata stable but updates modification timestamps on explicit refresh", async () => {
+  const app = await import("./app-store");
+  await app.initialize();
+  const document = await app.loadDocument("algebra", "Practice problems.md");
+  const entries = app.useApp.getState().entries;
+  const previous = entries.algebra?.find(
+    (entry) => entry.path === "Practice problems.md",
+  );
+  vi.setSystemTime(Date.now() + 1000);
+  document.edit(document.content + "\n\nAn additional paragraph.");
+  await document.flush();
+  expect(app.useApp.getState().entries).toBe(entries);
+  await app.refreshWorkspace("algebra");
+  const updated = app.useApp
+    .getState()
+    .entries.algebra?.find((entry) => entry.path === "Practice problems.md");
+  expect(updated?.modified).toBeGreaterThan(previous?.modified ?? 0);
+  expect(updated?.title).toBe(previous?.title);
+  expect(updated?.tags).toEqual(previous?.tags);
+});
+
+it("resets selected folders atomically on workspace changes while retaining same-workspace selection", async () => {
+  const app = await import("./app-store");
+  await app.initialize();
+  app.useApp.setState({ selectedFolder: "Lectures" });
+  app.openFile("algebra", "Practice problems.md");
+  expect(app.useApp.getState().selectedFolder).toBe("Lectures");
+  app.openFile("web", "React.md");
+  expect(app.useApp.getState().selectedFolder).toBe("");
+  app.useApp.setState({ selectedFolder: "Components" });
+  app.switchWorkspace("web");
+  expect(app.useApp.getState().selectedFolder).toBe("Components");
+  app.openInSplit("algebra", "Lectures/Eigenvalues.md");
+  expect(app.useApp.getState().selectedFolder).toBe("");
+  app.useApp.setState({ selectedFolder: "Lectures" });
+  app.switchWorkspace("web");
+  expect(app.useApp.getState().selectedFolder).toBe("");
+});
+
+it("refresh detects external edits to dirty notes and close remains blocked until recovery", async () => {
+  const app = await import("./app-store");
+  const { files } = await import("../platform");
+  await app.initialize();
+  app.openFile("algebra", "Practice problems.md");
+  const document = await app.loadDocument("algebra", "Practice problems.md");
+  document.edit("# Local changes\n\nKeep this text.");
+  const disk = await files.readNote("algebra", "Practice problems.md");
+  await files.saveNote("algebra", { ...disk, content: "# Changed elsewhere" });
+  await app.refreshWorkspace("algebra");
+  expect(document.content).toBe("# Local changes\n\nKeep this text.");
+  expect(document.getSnapshot().status.kind).toBe("conflict");
+  await expect(
+    app.closeFile("algebra", "Practice problems.md"),
+  ).rejects.toThrow("changed on disk");
+  expect(app.currentSession().tabs).toContain("Practice problems.md");
+  expect(app.peekDocument("algebra", "Practice problems.md")).toBe(document);
+  await app.keepDocument(document);
+  expect(
+    (await files.readNote("algebra", "Practice problems.md")).content,
+  ).toBe("# Local changes\n\nKeep this text.");
+  expect(document.getSnapshot().status.kind).toBe("saved");
+  await app.closeFile("algebra", "Practice problems.md");
+  expect(app.currentSession().tabs).not.toContain("Practice problems.md");
+});
+
+it("Reload reads the latest disk version instead of an earlier conflict observation", async () => {
+  const app = await import("./app-store");
+  const { files } = await import("../platform");
+  await app.initialize();
+  const document = await app.loadDocument("algebra", "Practice problems.md");
+  document.edit("# Local");
+  const disk = await files.readNote("algebra", "Practice problems.md");
+  const changed = await files.saveNote("algebra", {
+    ...disk,
+    content: "# First external version",
+  });
+  await app.refreshWorkspace("algebra");
+  expect(document.getSnapshot().status.kind).toBe("conflict");
+  await files.saveNote("algebra", {
+    ...changed,
+    content: "# Latest external version",
+  });
+  await app.reloadDocument(document);
+  expect(document.content).toBe("# Latest external version");
+  expect(document.getSnapshot().status.kind).toBe("saved");
+  expect(document.dirty).toBe(false);
+  expect(
+    app.useApp
+      .getState()
+      .entries.algebra?.find((entry) => entry.path === "Practice problems.md")
+      ?.title,
+  ).toBe("Latest external version");
+});
+
+it("retires a conflicted source only after its recovery copy is durable", async () => {
+  const app = await import("./app-store");
+  const { files } = await import("../platform");
+  await app.initialize();
+  app.openFile("algebra", "Practice problems.md");
+  const document = await app.loadDocument("algebra", "Practice problems.md");
+  document.edit("# Recovery copy\n\nKeep both versions.");
+  document.receiveExternal("# Disk", "external");
+  await app.saveCopy(document);
+  expect(document.getSnapshot().editable).toBe(false);
+  expect(app.peekDocument("algebra", "Practice problems.md")).toBeUndefined();
+  expect(app.currentSession().tabs).not.toContain("Practice problems.md");
+  const copyPath = app.currentSession().primary!;
+  expect((await files.readNote("algebra", copyPath)).content).toBe(
+    "# Recovery copy\n\nKeep both versions.",
+  );
+});
+
+it("does not retire a recovered conflict when newer edits return to the original copied text", async () => {
+  const app = await import("./app-store");
+  const { files } = await import("../platform");
+  await app.initialize();
+  app.openFile("algebra", "Practice problems.md");
+  const document = await app.loadDocument("algebra", "Practice problems.md");
+  document.edit("# Recovery copy");
+  document.receiveExternal("# Disk", "external");
+  const create = files.createNote.bind(files);
+  const started = barrier(),
+    release = barrier();
+  vi.spyOn(files, "createNote").mockImplementationOnce(async (...args) => {
+    started.resolve();
+    await release.promise;
+    return create(...args);
+  });
+  const copying = app.saveCopy(document);
+  await started.promise;
+  document.edit("# Newer edits");
+  document.edit("# Recovery copy");
+  release.resolve();
+  await copying;
+  expect(app.peekDocument("algebra", "Practice problems.md")).toBe(document);
+  expect(app.currentSession().tabs).toContain("Practice problems.md");
+  expect(document.getSnapshot().editable).toBe(true);
+  expect(document.getSnapshot().status.kind).toBe("conflict");
+});
+
+it("failed recovery copy saves keep the original conflict and its newest text reachable", async () => {
+  const app = await import("./app-store");
+  const { files } = await import("../platform");
+  await app.initialize();
+  app.openFile("algebra", "Practice problems.md");
+  const document = await app.loadDocument("algebra", "Practice problems.md");
+  document.edit("# Keep this local text");
+  document.receiveExternal("# Disk", "external");
+  vi.spyOn(files, "saveNote").mockRejectedValueOnce(new Error("Disk full"));
+  await expect(app.saveCopy(document)).rejects.toThrow("Disk full");
+  expect(app.peekDocument("algebra", "Practice problems.md")).toBe(document);
+  expect(app.currentSession().tabs).toContain("Practice problems.md");
+  expect(document.content).toBe("# Keep this local text");
+  expect(document.getSnapshot().status.kind).toBe("conflict");
+});
+
+it("warns once about a failed open-note reread without discarding its buffer", async () => {
+  const app = await import("./app-store");
+  const { files } = await import("../platform");
+  await app.initialize();
+  app.openFile("algebra", "Practice problems.md");
+  const document = await app.loadDocument("algebra", "Practice problems.md");
+  const content = document.content;
+  vi.spyOn(files, "readNote").mockRejectedValueOnce(
+    new Error("Read unavailable"),
+  );
+  await app.refreshWorkspace("algebra");
+  expect(document.content).toBe(content);
+  expect(app.currentSession().tabs).toContain("Practice problems.md");
+  expect(app.useApp.getState().notice?.match(/Read unavailable/g)).toHaveLength(
+    1,
+  );
+});
+
+it("takes a post-create-folder scan instead of joining a pre-mutation refresh", async () => {
+  const app = await import("./app-store"),
+    { files } = await import("../platform");
+  await app.initialize();
+  const scan = files.scanWorkspace.bind(files),
+    started = barrier(),
+    release = barrier();
+  vi.spyOn(files, "scanWorkspace").mockImplementationOnce(async (id) => {
+    const snapshot = await scan(id);
+    started.resolve();
+    await release.promise;
+    return snapshot;
+  });
+  const old = app.refreshWorkspace("algebra");
+  await started.promise;
+  await app.createFolder("algebra", "", "Created during scan");
+  release.resolve();
+  await old;
+  expect(
+    app.useApp
+      .getState()
+      .entries.algebra?.some((entry) => entry.path === "Created during scan"),
+  ).toBe(true);
+});
+
+it("reports refresh failure as a warning after folder creation commits", async () => {
+  const app = await import("./app-store"),
+    { files } = await import("../platform");
+  await app.initialize();
+  const scan = files.scanWorkspace.bind(files);
+  vi.spyOn(files, "scanWorkspace").mockRejectedValueOnce(
+    new Error("scan unavailable"),
+  );
+  await expect(
+    app.createFolder("algebra", "", "Committed folder"),
+  ).resolves.toBeUndefined();
+  expect(
+    (await scan("algebra")).entries.some(
+      (entry) => entry.path === "Committed folder",
+    ),
+  ).toBe(true);
+  expect(app.useApp.getState().notice).toBe(
+    "Workspace changed, but could not be refreshed: scan unavailable",
+  );
+});
+
+it("creates a folder through an accepted workspace workflow after removal begins", async () => {
+  const app = await import("./app-store");
+  const { files } = await import("../platform");
+  await app.initialize();
+  const started = barrier(),
+    release = barrier();
+  const workflow = app.withWorkspaceDocuments("algebra", async (documents) => {
+    started.resolve();
+    await release.promise;
+    await documents.createFolder("", "Accepted workflow folder");
+    await documents.createContent(
+      "Accepted workflow folder",
+      "# Accepted workflow",
+      "Accepted workflow folder/Accepted.md",
+      false,
+    );
+  });
+  await started.promise;
+  const removing = app.removeWorkspace("algebra");
+  await expect(
+    app.createFolder("algebra", "", "Rejected late folder"),
+  ).rejects.toThrow();
+  release.resolve();
+  await Promise.all([workflow, removing]);
+  expect(
+    (await files.readNote("algebra", "Accepted workflow folder/Accepted.md"))
+      .content,
+  ).toBe("# Accepted workflow");
+  expect(
+    app.useApp
+      .getState()
+      .workspaces.some((workspace) => workspace.id === "algebra"),
+  ).toBe(false);
 });

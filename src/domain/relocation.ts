@@ -1,10 +1,10 @@
-import { remapFavorites } from "../knowledge/library";
+import { remapFavorites } from "./library";
 import type { AppState } from "./app-store";
 import type { Entry, FileService, SaveResult } from "./contracts";
 import type { NoteDocument } from "./document";
 import type { DocumentLifetime } from "./document-lifetime";
 import { transitionSession } from "./workspace-session";
-import { errorMessage, extractTags, noteTitle } from "./notes";
+import { errorMessage, extractAliases, extractTags, noteTitle } from "./notes";
 
 type Host = {
   setState: (
@@ -164,20 +164,40 @@ export class Relocations {
     const workspaceId = document.workspaceId;
     this.remap(workspaceId, previousPath, result.path, "note");
     this.host.setState((state) => {
-      const previous = state.entries[workspaceId]?.find(
-        (entry) => entry.path === result.path,
-      );
-      const entries = (state.entries[workspaceId] ?? []).filter(
-        (entry) => entry.path !== result.path,
-      );
-      entries.push({
+      const entries = state.entries[workspaceId] ?? [];
+      const previous = entries.find((entry) => entry.path === result.path);
+      const title = noteTitle(result.path, result.content);
+      const tags = extractTags(result.content);
+      const aliases = extractAliases(result.content);
+      // Autosave updates live buffers directly. Leave metadata and the tree
+      // unchanged for body edits; explicit scans refresh filesystem timestamps.
+      if (
+        previous?.kind === "note" &&
+        previous.title === title &&
+        previous.tags.length === tags.length &&
+        previous.tags.every((tag, index) => tag === tags[index]) &&
+        (previous.aliases ?? []).length === aliases.length &&
+        (previous.aliases ?? []).every(
+          (alias, index) => alias === aliases[index],
+        )
+      )
+        return state;
+      const updated: Entry = {
         path: result.path,
         kind: "note",
-        title: noteTitle(result.path, result.content),
-        tags: extractTags(result.content),
+        title,
+        tags,
+        aliases,
         modified: Math.max(Date.now(), (previous?.modified ?? 0) + 1),
-      });
-      return { entries: { ...state.entries, [workspaceId]: entries } };
+      };
+      return {
+        entries: {
+          ...state.entries,
+          [workspaceId]: previous
+            ? entries.map((entry) => (entry === previous ? updated : entry))
+            : [...entries, updated],
+        },
+      };
     });
     this.applyRewrites(result.rewritten);
     this.reportWarnings(result.warnings);
@@ -263,14 +283,19 @@ export class Relocations {
           : {}),
         entries: {
           ...state.entries,
-          [workspaceId]: (state.entries[workspaceId] ?? []).map((entry) => ({
-            ...entry,
-            path: map(entry.path),
-            title:
-              entry.kind === "note"
-                ? entry.title
-                : (map(entry.path).split("/").at(-1) ?? entry.title),
-          })),
+          [workspaceId]: (state.entries[workspaceId] ?? []).map((entry) => {
+            const path = map(entry.path);
+            return path === entry.path
+              ? entry
+              : {
+                  ...entry,
+                  path,
+                  title:
+                    entry.kind === "note"
+                      ? entry.title
+                      : (path.split("/").at(-1) ?? entry.title),
+                };
+          }),
         },
         appearances: {
           ...state.appearances,

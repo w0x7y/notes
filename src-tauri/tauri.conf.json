@@ -20,14 +20,16 @@
       }
     ],
     "security": {
+      "capabilities": ["default"],
       "csp": {
         "default-src": "'self'",
         "script-src": "'self'",
         "style-src": "'self' 'unsafe-inline'",
-        "img-src": "'self' data: blob: https: http:",
+        "img-src": "'self' data: blob: https:",
         "font-src": "'self' data:",
         "connect-src": "ipc: http://ipc.localhost",
         "object-src": "'none'",
+        "frame-src": "'none'",
         "base-uri": "'self'",
         "form-action": "'none'"
       },

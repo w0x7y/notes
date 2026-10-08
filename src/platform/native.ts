@@ -23,6 +23,9 @@ async function call<T>(
   return schema.parse(await invoke<unknown>(command, args));
 }
 
+// Tauri serializes Rust's unit return value as JSON null.
+const unitSchema = z.null().transform(() => undefined);
+
 export const nativeFiles: FileService = {
   kind: "native",
   listFonts: () => call("list_fonts", {}, z.array(z.string())),
@@ -45,7 +48,7 @@ export const nativeFiles: FileService = {
   deleteFile: (workspaceId, path, revision) =>
     call("delete_file", { workspaceId, path, revision }, deleteResultSchema),
   loadSettings: () => call("load_settings", {}, settingsSchema),
-  saveSessions: (settings) => invoke("save_sessions", settings),
+  saveSessions: (settings) => call("save_sessions", settings, unitSchema),
   addWorkspace: (path) => call("add_workspace", { path }, snapshotSchema),
   updateWorkspace: (workspace) =>
     call(
@@ -82,7 +85,7 @@ export const nativeFiles: FileService = {
       saveResultSchema,
     ),
   createFolder: (workspaceId, parent, name) =>
-    invoke("create_folder", { workspaceId, parent, name }),
+    call("create_folder", { workspaceId, parent, name }, unitSchema),
   moveFolder: (workspaceId, path, destination) =>
     call("move_folder", { workspaceId, path, destination }, moveFolderSchema),
   readImage: (workspaceId, path) =>

@@ -129,3 +129,118 @@ it("invalidates content for unopened notes rewritten by a rename", async () => {
     ),
   ).toBe(true);
 });
+
+function workflowBarrier() {
+  let resolve = () => {};
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+it("finishes template folder preparation using a post-create scan while an earlier scan is pending", async () => {
+  const app = await import("../domain/app-store");
+  const { ensureTemplates } = await import("./templates");
+  const { files } = await import("../platform");
+  await app.initialize();
+  const scan = files.scanWorkspace.bind(files),
+    started = workflowBarrier(),
+    release = workflowBarrier();
+  vi.spyOn(files, "scanWorkspace").mockImplementationOnce(async (id) => {
+    const snapshot = await scan(id);
+    started.resolve();
+    await release.promise;
+    return snapshot;
+  });
+  const oldRefresh = app.refreshWorkspace("algebra");
+  await started.promise;
+  let finished = false;
+  const preparing = ensureTemplates("algebra").then(() => {
+    finished = true;
+  });
+  await vi.advanceTimersByTimeAsync(0);
+  const finishedBeforeOldScan = finished;
+  release.resolve();
+  await Promise.all([oldRefresh, preparing]);
+  expect(finishedBeforeOldScan).toBe(true);
+  expect(
+    app.useApp
+      .getState()
+      .entries.algebra?.some(
+        (entry) => entry.kind === "folder" && entry.path === "Templates",
+      ),
+  ).toBe(true);
+  expect(
+    app.useApp
+      .getState()
+      .entries.algebra?.some((entry) => entry.path === "Templates/Lecture.md"),
+  ).toBe(true);
+});
+
+it("continues template setup after folder creation commits but its follow-up scan fails", async () => {
+  const app = await import("../domain/app-store");
+  const { ensureTemplates } = await import("./templates");
+  const { files } = await import("../platform");
+  await app.initialize();
+  vi.spyOn(files, "scanWorkspace").mockRejectedValueOnce(
+    new Error("template scan unavailable"),
+  );
+  await expect(ensureTemplates("algebra")).resolves.toBeUndefined();
+  expect(
+    (await files.readNote("algebra", "Templates/Lecture.md")).content,
+  ).toContain("{{title}}");
+  expect(app.useApp.getState().notice).toBe(
+    "Workspace changed, but could not be refreshed: template scan unavailable",
+  );
+});
+
+it("recovers an existing template folder missing from the current index", async () => {
+  const app = await import("../domain/app-store");
+  const { ensureTemplates } = await import("./templates");
+  const { files } = await import("../platform");
+  await app.initialize();
+  await files.createFolder("algebra", "", "Templates");
+  vi.spyOn(files, "createFolder").mockRejectedValueOnce(
+    new Error("An entry already exists at that path."),
+  );
+  await ensureTemplates("algebra");
+  expect(
+    (await files.readNote("algebra", "Templates/Lecture.md")).content,
+  ).toContain("{{title}}");
+  expect(
+    app.useApp
+      .getState()
+      .entries.algebra?.some((entry) => entry.path === "Templates"),
+  ).toBe(true);
+});
+
+it("finishes admitted template folder creation when workspace retirement has already begun", async () => {
+  const app = await import("../domain/app-store");
+  const { ensureTemplates } = await import("./templates");
+  const { files } = await import("../platform");
+  await app.initialize();
+  const create = files.createFolder.bind(files),
+    started = workflowBarrier(),
+    release = workflowBarrier();
+  vi.spyOn(files, "createFolder").mockImplementationOnce(async (...args) => {
+    started.resolve();
+    await release.promise;
+    return create(...args);
+  });
+  const preparing = ensureTemplates("algebra");
+  await started.promise;
+  const removing = app.removeWorkspace("algebra");
+  await expect(
+    app.createFolder("algebra", "", "Late folder"),
+  ).rejects.toThrow();
+  release.resolve();
+  await Promise.all([preparing, removing]);
+  expect(
+    (await files.readNote("algebra", "Templates/Lecture.md")).content,
+  ).toContain("{{title}}");
+  expect(
+    app.useApp
+      .getState()
+      .workspaces.some((workspace) => workspace.id === "algebra"),
+  ).toBe(false);
+});

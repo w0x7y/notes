@@ -99,7 +99,7 @@ export function ItemIcon({
     return () => {
       mounted = false;
     };
-  }, [resolvedName]);
+  }, [resolvedName, active?.name]);
 
   if (failedName === resolvedName) {
     const FallbackIcon = fallbackComponents[fallback];

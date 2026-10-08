@@ -6,7 +6,7 @@ import { parentFolder } from "../domain/notes";
 import { navigateTo, useApp } from "../domain/app-store";
 import { useKnowledge } from "./index";
 import { emptyFilters, searchContent, type ContentFilters } from "./model";
-import { removeSearch, saveSearch, useLibrary } from "./library";
+import { removeSearch, saveSearch, useLibrary } from "../domain/library";
 import "./knowledge.css";
 function Highlight({ text, terms }: { text: string; terms: string[] }) {
   if (!terms.length) return <>{text}</>;

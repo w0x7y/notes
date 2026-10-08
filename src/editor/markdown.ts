@@ -55,7 +55,9 @@ parser.renderer.rules.image = (tokens, index) => {
   if (!token) return "";
   const source = String(token.attrGet("src") ?? "");
   const alt = parser.utils.escapeHtml(token.content);
-  if (/^https?:\/\//i.test(source))
+  if (/^http:\/\//i.test(source))
+    return `<span class="muted">HTTP image blocked: ${alt || "Image"}</span>`;
+  if (/^https:\/\//i.test(source))
     return `<img src="${parser.utils.escapeHtml(source)}" alt="${alt}" loading="lazy" referrerpolicy="no-referrer">`;
   return `<img data-local-src="${parser.utils.escapeHtml(source)}" alt="${alt}" loading="lazy">`;
 };

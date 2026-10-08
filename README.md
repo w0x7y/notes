@@ -9,7 +9,7 @@ npm install
 npm run desktop
 ```
 
-Requires Node.js, Rust, and the Linux Tauri build dependencies. This project was built on CachyOS with GTK 3 and WebKitGTK 4.1 already installed. See [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for another machine.
+Requires Node.js 24.15+ LTS (recommended), Rust, and the Linux Tauri build dependencies. Node.js 22.22.2+ in the 22.x series and Node.js 26+ are also supported by the current dependencies. This project was built on CachyOS with GTK 3 and WebKitGTK 4.1 already installed. See [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for another machine.
 
 To build and run the release executable:
 
@@ -33,8 +33,9 @@ On NVIDIA/Wayland, startup applies `__NV_DISABLE_EXPLICIT_SYNC=1` unless explici
 - Right-click a note or image to open it, split it, rename/move it, customize its icon/color, copy its path, or move it to Trash.
 - Right-click a folder to rename or move it, customize its icon and name color, or move it and all its contents to Trash after confirmation. Open notes inside the folder save first; failed saves or Trash operations keep their buffers and tabs available. Folders shared with another registered workspace require removing that workspace registration before deletion. Drag notes, images, or folders onto a folder or the Files heading to move them within the workspace. Existing destinations and moves into a folder itself are rejected. All 2,118 names in the installed free Lucide catalog are searchable and bundled offline; no account is needed. Workspace settings use the same picker. Colors can use a palette or a custom hex value.
 - Remove a workspace through its settings without deleting its directory. Pending notes save first; failures keep the workspace open.
-- Ordinary `.md` files, optional folders, inline English/Hebrew tags.
-- Global fuzzy title/tag search, with the current workspace first. Combine terms, such as `vector #exam`.
+- Ordinary `.md` files, optional folders, and English/Hebrew tags from inline text or YAML `tags:` strings/lists. YAML `aliases:` strings/lists feed search, wiki-link resolution and completion, backlinks, and the graph. Malformed frontmatter is left intact and ignored for metadata extraction.
+- In-note find and replace, selection match highlighting, next-occurrence selection, and multiple cursors in the Markdown editor. Search handles Hebrew and English; replacements participate in undo. Empty editors show the slash-command and note-link completion hints.
+- Global fuzzy title/alias/tag search, with the current workspace first. Combine terms, such as `vector #exam`.
 - Full-text search with matching snippets, workspace/folder/tag filters, and saved searches.
 - Note/heading autocomplete, backlinks, heading outline, pinned notes, and Markdown slash commands.
 - Hierarchical note graph from workspace tools or the command palette. Circular links bundle through workspace/folder groups; inspect incoming/outgoing connections, search notes, switch scope, zoom/pan, and open a note. Settings → Graph adjusts bundling strength with a visual preview.
@@ -45,29 +46,44 @@ On NVIDIA/Wayland, startup applies `__NV_DISABLE_EXPLICIT_SYNC=1` unless explici
 - Raw Markdown editing with compact Edit/Read controls, a toggleable formatting bar, and a preview whose paragraphs reveal editable Markdown when clicked. Drawing, formatting, and rename actions are in the note header’s More note actions menu. Navigation and dialogs follow the UI font preference independently of the note font.
 - Automatic paragraph direction for mixed Hebrew/English; code stays LTR.
 - Tables, task lists, syntax-highlighted code, math, wiki links, existing inline images, and image tabs with zoom.
-- Debounced autosave with Saving/Saved/Failed states in the bottom status bar, retry, and Save a copy. Saving and renaming share a document queue so typing can continue during disk writes.
+- Debounced autosave with Saving/Saved/Failed states in the bottom status bar. A separate Changed on disk state pauses autosave and offers Reload with discard confirmation, Keep mine with a fresh revision check, and Save a copy. Ordinary save failures offer retry and Save a copy. Saving and renaming share a document queue so typing can continue during disk writes.
+- Native filesystem events refresh registered workspaces after a short debounce, excluding hidden and dependency/cache trees. Partial scans report warnings and retain previously indexed entries and open buffers until a complete scan succeeds.
 - New filenames follow the title until manually renamed. Existing files retain their names. Clicking the filename above a note opens rename/move.
+- Note titles use the first body H1 or the filename when no H1 exists. Opening a note or editing its body preserves frontmatter and does not insert a heading; editing the title explicitly changes or adds its H1.
 - Atomic writes, revision conflict detection, and save-before-close. A failed save keeps the window open and retains the text in memory.
+- Corrupt settings are backed up before recovery. Invalid preferences reset to defaults while preserving valid workspace registrations, sessions, and appearances. Notes are limited to 20 MiB for reading and saving; larger files remain listed using their filename, and opening them reports the limit. Linux file and folder moves use an atomic no-overwrite rename.
 - Moves reconcile open notes, tabs, pins, folder selection and appearance together. Typing can continue during a move; subsequent save or reread failures retain the buffer and report a warning separately from the committed move. Closing waits for queued relocations and note creation.
 
 ## Keyboard
 
-| Shortcut | Action |
-| --- | --- |
-| Ctrl+, | App settings |
-| Ctrl+P | Search all workspace titles and tags |
-| Ctrl+Shift+P | Search note contents |
-| Ctrl+K | Command palette |
-| Ctrl+Shift+N | Quick capture in Quick Notes/Inbox |
-| Ctrl+Shift+D | Open today's note in Quick Notes/Daily |
-| Ctrl+N | New note in the selected folder |
-| Ctrl+S | Save pending changes |
-| Ctrl+W | Close the focused note after saving |
-| Ctrl+Tab / Ctrl+Shift+Tab | Next / previous tab |
-| Ctrl+\\ | Toggle split pane |
-| Ctrl+B / Ctrl+I | Bold / italic in Markdown |
-| Ctrl+Z / Ctrl+Shift+Z | Undo / redo in the editor |
-| ↑ / ↓, Enter, Escape | Navigate, open, and close search |
+App shortcuts use physical key positions and work with both Hebrew and English layouts. Right-click in the editor uses the native editing and spell-check menu. Settings → Shortcuts lists app commands and editor controls.
+
+| Shortcut                         | Action                                   |
+| -------------------------------- | ---------------------------------------- |
+| Ctrl+,                           | App settings                             |
+| Ctrl+P                           | Search all workspace titles and tags     |
+| Ctrl+Shift+P                     | Search note contents                     |
+| Ctrl+K                           | Command palette                          |
+| Ctrl+Shift+N                     | Quick capture in Quick Notes/Inbox       |
+| Ctrl+Shift+D                     | Open today's note in Quick Notes/Daily   |
+| Ctrl+N                           | New note in the selected folder          |
+| Ctrl+S                           | Save pending changes                     |
+| Ctrl+W                           | Close the focused note after saving      |
+| Ctrl+Tab / Ctrl+Shift+Tab        | Next / previous tab                      |
+| Ctrl+\\                          | Toggle split pane                        |
+| Ctrl+B / Ctrl+I                  | Bold / italic in Markdown                |
+| Ctrl+F                           | Find and replace in the editor           |
+| F3 / Shift+F3                    | Next / previous search match             |
+| Ctrl+D                           | Add the next occurrence to the selection |
+| Alt+drag                         | Rectangular selection                    |
+| Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y   | Undo / redo in the editor                |
+| ← / →, Home / End on tabs        | Select and focus a tab                   |
+| Delete on a tab                  | Close it after saving                    |
+| Enter / Space on a preview block | Edit that Markdown block                 |
+| Escape, then Tab                 | Move keyboard focus out of the editor    |
+| ↑ / ↓, Enter, Escape             | Navigate, open, and close search         |
+
+In Edit mode, find and replace covers the note body. A preview block's editor searches only that block. The title and properties remain separate fields. Search supports case sensitivity, regular expressions, and whole words.
 
 ## Agent context with Graft
 
@@ -90,11 +106,23 @@ summaries require a separate `graft build --deep` run.
 ```sh
 npm test
 npm run typecheck
+npm run lint
+npm run format:check
 npm run desktop:build
 cd src-tauri
 cargo test
 cargo clippy --all-targets -- -D warnings
 ```
+
+Final check on 2026-10-08 reviewed the complete working-tree change against `62d9ba0`, including the earlier implementation batches. YAML metadata expansion, unsafe folder moves, title clearing, a Keep mine observation race, cleartext image loading and excess native permissions are repaired. 393 frontend tests and 134 native tests passed, with one existing opt-in frontend benchmark skipped. The desktop release, strict Clippy, formatting, policy regressions, vendor integrity and dependency audits passed. See [coverage, remaining findings and verification limits](docs/final-check-2026-10-08.md).
+
+Architecture follow-up on 2026-10-08: both Workspace refresh and native Workspace mutation candidates are implemented. 387 frontend tests passed with one existing opt-in benchmark skipped; 128 native tests passed. Typecheck, lint, formatting, strict Clippy, vendor integrity, Cargo audit, optimized GLib regression and drawing bundle guard passed. The desktop release was rebuilt. See [architecture implementation and verification](docs/architecture-fixes-2026-10-08.md).
+
+Backlog batch two on 2026-10-08: 357 frontend tests passed with one existing opt-in benchmark skipped; 119 native tests passed. Typecheck, lint, formatting, strict Clippy, Cargo audit, vendor integrity, the optimized GLib regression, drawing bundle guard and desktop release rebuild passed. Browser checks covered conflict recovery, alias search and preserved Markdown/frontmatter. See [batch-two verification](docs/backlog-batch-two-2026-10-08.md).
+
+GitHub Actions runs frontend typechecking, tests, linting, formatting, security-policy regressions/checks, the production build and drawing bundle guard, plus native tests, formatting, strict Clippy, vendor integrity and the optimized GLib regression. Component tests use jsdom; domain tests continue to run in Node. Install the optional local pre-commit formatting/lint hook with `npm run hooks:install`.
+
+The project retains the TypeScript 7 compiler under `@typescript/native`. ESLint uses the official side-by-side TypeScript 6 API package under the `typescript` alias because its parser requires that API. `npm ci` installs both from the lockfile; `npm run typecheck` and `npm run build` use the TypeScript 7 `tsc` binary.
 
 Native dependency checks, from the repository root:
 
@@ -102,6 +130,13 @@ Native dependency checks, from the repository root:
 python3 scripts/check-native-dependencies.py
 cargo audit --file src-tauri/Cargo.lock --deny warnings
 cargo test --manifest-path src-tauri/Cargo.toml --locked --release --test glib_variant_iter
+```
+
+WebView policy checks, from the repository root:
+
+```sh
+python3 scripts/test-security-policy.py
+python3 scripts/check-security-policy.py
 ```
 
 Install `cargo-audit` with `cargo install cargo-audit --locked` if needed. The
@@ -135,11 +170,12 @@ Earlier baseline verification on 2026-09-29 (new workflow checks are documented 
 ## Current limits
 
 - This is a first desktop build, without an installer, cloud sync, or Vim mode.
-- Workspace contents refresh when the window regains focus by default; this is configurable. There is no continuous filesystem watcher yet.
+- Live filesystem refresh uses the operating system's watcher. Watch failures are reported; configurable focus refresh and manual refresh remain available. OS watch limits and network/cloud filesystem event delivery can affect live refresh.
 - Incoming-link updates handle direct wiki links and inline Markdown destinations in registered workspaces. Reference-style destinations, escaped paths, and outgoing relative links inside a moved note are not rewritten. Link-update failures are reported separately from the successful rename.
 - Existing images are supported; clipboard/drop image insertion is intentionally absent. Image tabs accept the native service’s supported formats and size limit.
+- Cleartext HTTP images are blocked. HTTPS images load automatically and can disclose your IP address and note-open time to the image host; remote-image opt-in remains planned.
 - Conflicting unsaved text is kept in memory and can be saved as a copy; there is no recovery journal after a process or system crash. External programs can still race a save in the short interval between revision checking and atomic replacement.
-- The initial JavaScript entry is about 47% smaller after splitting the editor, dialogs, and icon catalog. Some optional chunks still trigger Vite’s size warning. Local search, tree, preview, and scan measurements are in [docs/performance.md](docs/performance.md); end-to-end native input latency is not yet measured.
+- The editor, dialogs, and icon catalog load in separate chunks. Some optional chunks still trigger Vite’s size warning. Current bundle sizes and local search, tree, preview, and scan measurements are in [docs/performance.md](docs/performance.md); end-to-end native input latency is not yet measured.
 
 ## License
 

@@ -247,6 +247,7 @@ button[aria-pressed="true"] {
   scrollbar-width: none;
 }
 .tab {
+  cursor: pointer;
   display: flex;
   align-items: center;
   flex: none;
@@ -254,6 +255,9 @@ button[aria-pressed="true"] {
   font-size: 12px;
   padding-right: 8px;
   position: relative;
+}
+.tab:focus-visible {
+  background: var(--selection);
 }
 .tab:not(.active):hover {
   background: var(--selection);
@@ -681,7 +685,8 @@ button[aria-pressed="true"] {
   min-height: 10px;
   cursor: text;
 }
-.preview-block:hover {
+.preview-block:hover,
+.preview-block:focus-visible {
   background: var(--hover);
 }
 .preview-block p {

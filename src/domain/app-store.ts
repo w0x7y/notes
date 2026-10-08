@@ -1,4 +1,4 @@
-import { forgetFavorites } from "../knowledge/library";
+import { forgetFavorites } from "./library";
 import {
   defaultPreferences,
   preferencesSchema,
@@ -25,6 +25,7 @@ import {
 export { emptySession } from "./workspace-session";
 import { errorMessage } from "./notes";
 import { Relocations } from "./relocation";
+import { WorkspaceRefresh } from "./workspace-refresh";
 import { files } from "../platform";
 
 export type AppState = Settings & {
@@ -65,12 +66,13 @@ const lifetime = new DocumentLifetime(
       (document, previousPath, result) =>
         relocations.saved(document, previousPath, result),
       useApp.getState().preferences.autosaveDelayMs,
+      (path) => files.readNote(id, path),
     ),
 );
-const workspaceRegistrations = new Map<string, symbol>();
+
 function activateWorkspace(id: string): void {
   lifetime.activate(id);
-  workspaceRegistrations.set(id, Symbol());
+  workspaceRefresh.register(id);
 }
 let persistTimer: ReturnType<typeof setTimeout> | undefined;
 let persisting: Promise<void> = Promise.resolve();
@@ -80,7 +82,18 @@ const relocations = new Relocations({
   files,
   persist: persistNow,
   persistSoon,
-  refresh,
+  refresh: (id) => workspaceRefresh.refresh(id, { duringRelocation: true }),
+  report: (error) => showError(error),
+});
+const workspaceRefresh = new WorkspaceRefresh({
+  files,
+  lifetime,
+  relocations,
+  entries: (id) => useApp.getState().entries[id] ?? [],
+  publish: (id, entries) =>
+    useApp.setState((state) => ({
+      entries: { ...state.entries, [id]: entries },
+    })),
   report: (error) => showError(error),
 });
 export const showError = (error: unknown) =>
@@ -105,10 +118,20 @@ function persistSoon(): void {
   persistTimer = setTimeout(() => run(persistNow()), 250);
 }
 
-export async function initialize(): Promise<void> {
+let initialization: Promise<void> | undefined;
+/** Share startup work across overlapping mounts, while allowing explicit reload. */
+export function initialize(): Promise<void> {
+  if (initialization) return initialization;
+  initialization = initializeOnce().finally(() => {
+    initialization = undefined;
+  });
+  return initialization;
+}
+
+async function initializeOnce(): Promise<void> {
   try {
     const settings = await files.loadSettings();
-    workspaceRegistrations.clear();
+    workspaceRefresh.reset();
     for (const workspace of settings.workspaces)
       activateWorkspace(workspace.id);
     const activeWorkspaceId = settings.workspaces.some(
@@ -119,6 +142,7 @@ export async function initialize(): Promise<void> {
     useApp.setState({
       ...settings,
       activeWorkspaceId,
+      selectedFolder: "",
       sessions: settings.preferences.restoreSession
         ? Object.fromEntries(
             Object.entries(settings.sessions).map(([id, session]) => [
@@ -131,14 +155,7 @@ export async function initialize(): Promise<void> {
     // Read the active workspace first, before background work can occupy disk workers.
     const scan = async (workspace: Workspace) => {
       try {
-        const snapshot = await files.scanWorkspace(workspace.id);
-        if (
-          !useApp.getState().workspaces.some((item) => item.id === workspace.id)
-        )
-          return;
-        useApp.setState((state) => ({
-          entries: { ...state.entries, [workspace.id]: snapshot.entries },
-        }));
+        await workspaceRefresh.refresh(workspace.id);
       } catch (error) {
         showError(`Could not open ${workspace.name}: ${errorMessage(error)}`);
       }
@@ -163,22 +180,27 @@ export async function initialize(): Promise<void> {
 export async function addWorkspace(path: string): Promise<void> {
   return lifetime.admitRegistration(async () => {
     const snapshot = await files.addWorkspace(path);
-    activateWorkspace(snapshot.workspace.id);
+    lifetime.activate(snapshot.workspace.id);
     useApp.setState((state) => ({
       workspaces: [
         ...state.workspaces.filter((item) => item.id !== snapshot.workspace.id),
         snapshot.workspace,
       ],
-      entries: { ...state.entries, [snapshot.workspace.id]: snapshot.entries },
       activeWorkspaceId: snapshot.workspace.id,
+      selectedFolder: "",
       focusedPane: "primary",
     }));
+    workspaceRefresh.register(snapshot.workspace.id, snapshot);
     persistSoon();
   });
 }
 
 export function switchWorkspace(id: string): void {
-  useApp.setState({ activeWorkspaceId: id, focusedPane: "primary" });
+  useApp.setState((state) => ({
+    activeWorkspaceId: id,
+    focusedPane: "primary",
+    selectedFolder: state.activeWorkspaceId === id ? state.selectedFolder : "",
+  }));
   persistSoon();
 }
 export function currentSession(): Session {
@@ -221,7 +243,9 @@ export function openFile(
   useApp.setState({
     activeWorkspaceId: id,
     navigation: null,
-    ...(previousId === id ? {} : { focusedPane: "primary" }),
+    ...(previousId === id
+      ? {}
+      : { focusedPane: "primary", selectedFolder: "" }),
   });
   updateSession(id, { kind: "open", path, pane });
 }
@@ -235,7 +259,9 @@ export function openInSplit(id: string, path: string): void {
   useApp.setState({
     activeWorkspaceId: id,
     navigation: null,
-    ...(previousId === id ? {} : { focusedPane: "primary" }),
+    ...(previousId === id
+      ? {}
+      : { focusedPane: "primary", selectedFolder: "" }),
   });
   updateSession(id, { kind: "open-split", path });
 }
@@ -406,12 +432,20 @@ export async function removeWorkspace(id: string): Promise<void> {
     },
     async () => {
       const settings = await files.removeWorkspace(id);
-      workspaceRegistrations.delete(id);
+      workspaceRefresh.unregister(id);
       forgetFavorites(id);
       useApp.setState((state) => {
         const entries = { ...state.entries };
         delete entries[id];
-        return { ...settings, entries, focusedPane: "primary" };
+        return {
+          ...settings,
+          entries,
+          focusedPane: "primary",
+          selectedFolder:
+            settings.activeWorkspaceId === state.activeWorkspaceId
+              ? state.selectedFolder
+              : "",
+        };
       });
     },
   );
@@ -447,11 +481,17 @@ export function createFolder(
   parent: string,
   name: string,
 ): Promise<void> {
-  return lifetime.admit(id, async () => {
-    const currentParent = await relocations.afterMoves(id, parent);
-    await files.createFolder(id, currentParent, name);
-    await refresh(id);
-  });
+  return lifetime.admit(id, () => createFolderAccepted(id, parent, name));
+}
+
+async function createFolderAccepted(
+  id: string,
+  parent: string,
+  name: string,
+): Promise<void> {
+  const currentParent = await relocations.afterMoves(id, parent);
+  await files.createFolder(id, currentParent, name);
+  await workspaceRefresh.refresh(id, { afterMutation: true });
 }
 
 async function newNoteAccepted(id: string, folder = ""): Promise<void> {
@@ -491,95 +531,50 @@ export async function moveEntry(
 export const moveFolder = (id: string, path: string, destination: string) =>
   lifetime.admit(id, () => relocations.moveFolder(id, path, destination));
 
+export function reloadDocument(document: NoteDocument): Promise<void> {
+  return lifetime.admit(document.workspaceId, async () => {
+    await relocations.whenIdle();
+    await document.reloadFromDisk((path) =>
+      files.readNote(document.workspaceId, path),
+    );
+    await workspaceRefresh
+      .refresh(document.workspaceId, { afterMutation: true })
+      .catch(showError);
+  });
+}
+
+export function keepDocument(document: NoteDocument): Promise<void> {
+  return lifetime.admit(document.workspaceId, async () => {
+    await relocations.whenIdle();
+    await document.keepMine((path) =>
+      files.readNote(document.workspaceId, path),
+    );
+  });
+}
+
 export async function saveCopy(document: NoteDocument): Promise<void> {
   return lifetime.admit(document.workspaceId, async () => {
     const content = document.content;
+    const editVersion = document.editVersion;
     const copy = await relocations.createNote(document.workspaceId, "");
     copy.edit(content);
     await copy.flush();
     // Once the recovery copy is durable, retire the failed buffer so it no
     // longer prevents closing the app. Never retire newer edits or active I/O.
-    if (
-      document.content === content &&
-      document.getSnapshot().status.kind === "failed" &&
-      !document.hasPendingOperation
-    ) {
-      const path = document.getSnapshot().path;
-      lifetime.releaseRecovered(document, content);
+    const path = document.getSnapshot().path;
+    if (lifetime.releaseRecovered(document, content, editVersion))
       removeTab(document.workspaceId, path);
-    }
     openFile(document.workspaceId, copy.getSnapshot().path);
   });
 }
 
-const refreshing = new Map<
-  string,
-  { registration: symbol | undefined; request: Promise<void> }
->();
 export function refreshWorkspace(id: string): Promise<void> {
-  const registration = workspaceRegistrations.get(id);
-  const pending = refreshing.get(id);
-  if (pending && pending.registration === registration) return pending.request;
-  const request = refresh(id).finally(() => {
-    if (refreshing.get(id)?.request === request) refreshing.delete(id);
-  });
-  refreshing.set(id, { registration, request });
-  return request;
+  return workspaceRefresh.refresh(id);
 }
-function sameEntries(a: Entry[], b: Entry[]): boolean {
-  return (
-    a.length === b.length &&
-    a.every((entry, index) => {
-      const other = b[index];
-      return (
-        other &&
-        entry.path === other.path &&
-        entry.kind === other.kind &&
-        entry.title === other.title &&
-        entry.modified === other.modified &&
-        entry.tags.length === other.tags.length &&
-        entry.tags.every((tag, i) => tag === other.tags[i])
-      );
-    })
-  );
-}
-async function refresh(id: string): Promise<void> {
-  const registration = workspaceRegistrations.get(id);
-  const isCurrent = () =>
-    workspaceRegistrations.get(id) === registration &&
-    useApp.getState().workspaces.some((workspace) => workspace.id === id);
-  const version = relocations.version;
-  const snapshot = await files.scanWorkspace(id);
-  if (version !== relocations.version || !isCurrent()) return;
-  const openDocuments = lifetime
-    .documents()
-    .filter((document) => document.workspaceId === id && !document.dirty);
-  await Promise.all(
-    openDocuments.map(async (document) => {
-      try {
-        const current = await files.readNote(id, document.getSnapshot().path);
-        if (
-          version !== relocations.version ||
-          !isCurrent() ||
-          lifetime.peek(id, document.getSnapshot().path) !== document
-        )
-          return;
-        document.receiveExternal(current.content, current.revision);
-      } catch {
-        /* A removed open note remains available in memory. */
-      }
-    }),
-  );
-  if (
-    version === relocations.version &&
-    isCurrent() &&
-    !sameEntries(useApp.getState().entries[id] ?? [], snapshot.entries)
-  ) {
-    useApp.setState((state) => ({
-      entries: { ...state.entries, [id]: snapshot.entries },
-    }));
-  }
-}
+
+/** Each platform listener owns a scoped stream of refresh invalidations. */
+export const observeWorkspaceInvalidations = () =>
+  workspaceRefresh.observeInvalidations();
 
 export function searchEntries(): SearchEntry[] {
   const state = useApp.getState();
@@ -673,14 +668,14 @@ async function createContentNoteAccepted(
 }
 async function registerCaptureWorkspace(): Promise<string> {
   const snapshot = await files.ensureCaptureWorkspace();
-  activateWorkspace(snapshot.workspace.id);
+  lifetime.activate(snapshot.workspace.id);
   useApp.setState((state) => ({
     workspaces: [
       ...state.workspaces.filter((w) => w.id !== snapshot.workspace.id),
       snapshot.workspace,
     ],
-    entries: { ...state.entries, [snapshot.workspace.id]: snapshot.entries },
   }));
+  workspaceRefresh.register(snapshot.workspace.id, snapshot);
   return snapshot.workspace.id;
 }
 
@@ -690,6 +685,8 @@ function workspaceDocuments(id: string) {
     id,
     load: (path: string) => loadDocumentAccepted(id, path),
     create: (folder = "") => newNoteAccepted(id, folder),
+    createFolder: (parent: string, name: string) =>
+      createFolderAccepted(id, parent, name),
     createContent: (
       folder: string,
       content: string,

@@ -19,6 +19,16 @@ it("renders math and wiki links while keeping HTML input inert", () => {
   expect(html).toContain('data-note-target="Vector spaces"');
   expect(html).toContain("katex");
 });
+it("blocks automatic HTTP images while retaining HTTPS and local image references", () => {
+  const html = renderMarkdown(
+    "![Insecure](http://example.com/image.png)\n\n![Secure](https://example.com/image.png)\n\n![Local](assets/image.png)",
+  );
+  expect(html).not.toContain('src="http://');
+  expect(html).not.toContain('data-local-src="http://');
+  expect(html).toContain("HTTP image blocked: Insecure");
+  expect(html).toContain('src="https://example.com/image.png"');
+  expect(html).toContain('data-local-src="assets/image.png"');
+});
 it("shares reference definitions across preview blocks", () => {
   const blocks = markdownBlocks(
     "[Site][site]\n\nAnother paragraph.\n\n![Photo][photo]\n\n[site]: https://example.com\n[photo]: assets/photo.png\n",

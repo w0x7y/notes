@@ -1,0 +1,9 @@
+# Backlog implementation, batch two
+
+This batch continues the user-approved `TODO.md` work. Preserve all first-batch fixes and existing unsaved changes. Markdown remains the source of truth; save queues, revision checks, atomic writes and failed-save buffer retention remain mandatory.
+
+- [x] Native refresh: recursive filesystem notifications scoped to registered roots, excluded-path filtering, burst debounce, warning events and focus-refresh fallback. Scan child failures return partial metadata and warnings; unavailable roots remain errors. Partial results must not prune omitted frontend entries.
+- [x] Conflict recovery: classify external changes by revisions, preserve newer edits, pause unresolved autosave, and offer Reload, Keep mine and Save a copy. Reload explicitly confirms discarding unsaved text; Keep mine still uses optimistic revision checks. Recovery, save and refresh races have deterministic regression coverage.
+- [x] Frontmatter compatibility: merge YAML and inline tags, extract aliases, match aliases in search/link resolution/completion/backlinks/graph, preserve ambiguity handling, and show filename fallback titles for notes without headings. Loading or body edits must not rewrite frontmatter or inject title headings.
+- [x] Integration: subscribe to native events without leaking listeners, coalesce repeated scans, retain follow-up events during in-flight scans, and skip removed roots. Validate incoming event payloads and snapshot metadata at the adapter boundary.
+- [x] Verification and documentation: run frontend tests/typecheck/lint/format checks, native tests/strict Clippy/format/vendor checks, UI interactions and a release desktop build. Update current docs and mark only fully verified TODO entries. Document remaining native watch/OS and performance limits.

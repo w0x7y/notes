@@ -17,12 +17,14 @@ export const preferencesSchema = z.object({
   customFont: z
     .string()
     .trim()
+    // eslint-disable-next-line no-control-regex -- Font names must reject control characters.
     .regex(/^[^\u0000-\u001f\u007f]*$/)
     .default(""),
   fontWeight: z.number().int().min(300).max(700).multipleOf(100).default(400),
   uiFont: z
     .string()
     .trim()
+    // eslint-disable-next-line no-control-regex -- Font names must reject control characters.
     .regex(/^[^\u0000-\u001f\u007f]*$/)
     .default(""),
   letterSpacing: z.number().min(-0.5).max(3).default(0),

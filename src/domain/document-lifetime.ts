@@ -187,11 +187,17 @@ export class DocumentLifetime {
     return true;
   }
 
-  releaseRecovered(document: NoteDocument, durableContent: string): boolean {
+  releaseRecovered(
+    document: NoteDocument,
+    durableContent: string,
+    editVersion: number,
+  ): boolean {
     if (
       document.content !== durableContent ||
+      document.editVersion !== editVersion ||
       document.hasPendingOperation ||
-      document.getSnapshot().status.kind !== "failed"
+      (document.getSnapshot().status.kind !== "failed" &&
+        document.getSnapshot().status.kind !== "conflict")
     )
       return false;
     this.dispose(document);

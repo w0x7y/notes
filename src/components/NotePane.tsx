@@ -43,7 +43,7 @@ import {
 import { FormattingToolbar } from "./FormattingToolbar";
 import { MenuButton } from "./PopupMenu";
 import { editorFontFamily } from "../domain/preferences";
-import { toggleFavorite, useLibrary } from "../knowledge/library";
+import { toggleFavorite, useLibrary } from "../domain/library";
 import "../knowledge/note-details.css";
 const NoteDetails = lazy(() =>
   import("../knowledge/NoteDetails").then((module) => ({
@@ -140,6 +140,10 @@ function NoteView({
   );
   const editor = useRef<EditorHandle>(null);
   const titleInput = useRef<HTMLInputElement>(null);
+  const [titleDraft, setTitleDraft] = useState<{
+    value: string;
+    externalVersion: number;
+  } | null>(null);
   const scroll = useRef<HTMLDivElement>(null);
   const pendingFormat = useRef<Format | null>(null);
   const body = splitNote(document.content).body;
@@ -298,12 +302,23 @@ function NoteView({
               aria-label="Note title"
               placeholder="Untitled"
               dir="auto"
-              value={snapshot.title}
-              readOnly={!snapshot.editable}
-              onChange={(event) =>
-                document.getSnapshot().editable &&
-                document.edit(withTitle(document.content, event.target.value))
+              value={
+                titleDraft?.externalVersion === snapshot.externalVersion
+                  ? titleDraft.value
+                  : document.content
+                    ? snapshot.title
+                    : ""
               }
+              readOnly={!snapshot.editable}
+              onChange={(event) => {
+                if (!document.getSnapshot().editable) return;
+                setTitleDraft({
+                  value: event.target.value,
+                  externalVersion: snapshot.externalVersion,
+                });
+                document.edit(withTitle(document.content, event.target.value));
+              }}
+              onBlur={() => setTitleDraft(null)}
               onKeyDown={(event) => {
                 if (event.key === "Enter") {
                   event.preventDefault();
@@ -381,30 +396,40 @@ export function NotePane({
   workspaceId,
   path,
   onRename,
+  onDocumentChange,
 }: {
   workspaceId: string;
   path: string;
   onRename: (document: NoteDocument) => void;
+  onDocumentChange?: (document: NoteDocument | null) => void;
 }) {
   const [loaded, setLoaded] = useState<NoteDocument | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     setError(null);
+    onDocumentChange?.(null);
     void loadDocument(workspaceId, path)
       .then((document) => {
-        if (!cancelled) setLoaded(document);
+        if (!cancelled) {
+          setLoaded(document);
+          onDocumentChange?.(document);
+        }
       })
       .catch((reason) => {
-        if (!cancelled) setError(errorMessage(reason));
+        if (!cancelled) {
+          setError(errorMessage(reason));
+          onDocumentChange?.(null);
+        }
       });
     return () => {
       cancelled = true;
+      onDocumentChange?.(null);
     };
-  }, [workspaceId, path]);
+  }, [workspaceId, path, onDocumentChange]);
   if (error)
     return (
-      <div className="pane-message">
+      <div className="pane-message" role="alert">
         <TriangleAlert size={20} />
         <p>{error}</p>
       </div>

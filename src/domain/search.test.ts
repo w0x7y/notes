@@ -34,6 +34,19 @@ const entries: SearchEntry[] = [
     modified: 3,
   },
 ];
+
+it("matches aliases alongside title terms and nested tags", () => {
+  const source = {
+    ...entries[0]!,
+    aliases: ["Alternative title", "כינוי עברי"],
+    tags: ["עברית/לימוד"],
+  };
+  expect(searchNotes([source], "alternative #עברית/לימוד", null)).toEqual([
+    source,
+  ]);
+  expect(searchNotes([source], "כינוי", null)).toEqual([source]);
+  expect(searchNotes([source], "vector alternative", null)).toEqual([source]);
+});
 it("prioritizes current-workspace fuzzy matches before stronger matches elsewhere", () => {
   expect(
     searchNotes(entries, "vctr", "current").map((result) => result.path),

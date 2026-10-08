@@ -1,6 +1,6 @@
 use crate::markdown::{rewrite_links, LinkRewrite};
 use crate::model::{Rewrite, Workspace};
-use crate::pathing::{normalized_relative, read_regular_text, resolve};
+use crate::pathing::{normalized_relative, read_note_text, resolve};
 use crate::service::{is_image, is_note, revision, workspace_entry};
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
@@ -55,7 +55,7 @@ pub(crate) fn rewrite_incoming(
     workspaces: &[Workspace],
     target_workspace_id: &str,
     mappings: &[(PathBuf, PathBuf)],
-    write_note: impl Fn(&Path, &[u8]) -> Result<(), String>,
+    write_note: impl Fn(&Path, &[u8]) -> Result<Vec<String>, String>,
 ) -> (Vec<Rewrite>, Vec<String>) {
     if mappings.is_empty() {
         return (Vec::new(), Vec::new());
@@ -182,7 +182,7 @@ pub(crate) fn rewrite_incoming(
         };
         // Recheck the boundary after enumeration and before either file operation.
         let content = match resolve(root, &path, false)
-            .and_then(|safe_path| read_regular_text(&safe_path).map_err(|error| error.to_string()))
+            .and_then(|safe_path| read_note_text(&safe_path).map_err(|error| error.to_string()))
         {
             Ok(content) => content,
             Err(error) => {
@@ -238,11 +238,18 @@ pub(crate) fn rewrite_incoming(
         if changed == content {
             continue;
         }
-        if let Err(error) = resolve(root, &path, false)
+        match resolve(root, &path, false)
             .and_then(|safe_path| write_note(&safe_path, changed.as_bytes()))
         {
-            warnings.push(format!("Cannot update links in {path}: {error}"));
-            continue;
+            Ok(issues) => warnings.extend(
+                issues
+                    .into_iter()
+                    .map(|issue| format!("Links updated in {path}: {issue}")),
+            ),
+            Err(error) => {
+                warnings.push(format!("Cannot update links in {path}: {error}"));
+                continue;
+            }
         }
         rewritten.push(Rewrite {
             workspace_id: workspace.id.clone(),
@@ -305,7 +312,7 @@ mod tests {
                 let note = service.read_note(&workspace.id, &relative)?;
                 let content = std::str::from_utf8(bytes).map_err(|error| error.to_string())?;
                 service.save_note(&workspace.id, &relative, content, &note.revision)?;
-                Ok(())
+                Ok(Vec::new())
             },
         );
 

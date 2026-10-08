@@ -68,8 +68,8 @@ export function SearchDialog({
         <BrandMark size={24} />
         <input
           autoFocus
-          aria-label="Search titles and tags"
-          placeholder="Search titles or #tags…"
+          aria-label="Search titles, aliases and tags"
+          placeholder="Search titles, aliases or #tags…"
           value={query}
           onChange={(event) => {
             setQuery(event.target.value);
@@ -158,9 +158,7 @@ export function SearchDialog({
             )}
           </button>
         ))}
-        {!results.length && (
-          <p className="empty-search">No matching titles or tags.</p>
-        )}
+        {!results.length && <p className="empty-search">No matching notes.</p>}
       </div>
       <footer className="dialog-footer">
         <span>

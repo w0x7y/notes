@@ -19,8 +19,8 @@ A student and developer replacing their Obsidian workflow with a focused, keyboa
 ## Confirmed behavior
 
 - Existing folders open as workspaces, identified by a color and icon in a sidebar dropdown.
-- Regular Markdown files remain on disk; optional folders and inline English or Hebrew tags organize notes.
-- Global fuzzy search matches titles and tags, with current-workspace results first. A separate full-text search provides matching snippets, workspace/folder/tag filters, and saved searches.
+- Regular Markdown files remain on disk; optional folders and inline or YAML English/Hebrew tags organize notes. YAML aliases support search, wiki links, completion, backlinks and graph connections without rewriting the frontmatter.
+- Global fuzzy search matches titles, aliases and tags, with current-workspace results first. A separate full-text search provides matching snippets, workspace/folder/tag filters, and saved searches.
 - Folders start collapsed when opening or switching workspaces.
 - App settings support editor appearance/behavior, autosave timing, title/tag search scope and order, and workspace/session behavior. They persist separately from notes and open with Ctrl+comma.
 - Each workspace remembers its own tabs and split-pane layout. Opening a visible note focuses its pane. Closing or collapsing a split keeps the remaining note reachable. Middle-click closes a tab after saving, including a focused property draft.
@@ -29,15 +29,17 @@ A student and developer replacing their Obsidian workflow with a focused, keyboa
 - Folder context menus rename/move folders or delete them by moving the folder and all its contents to desktop Trash after confirmation. Open notes inside the folder save before deletion; failure retains their buffers and tabs. Sidebar files and folders can be dragged onto another folder or the Files heading to move them within the workspace.
 - Workspace settings can remove a registration while leaving its directory and files untouched.
 - Raw Markdown is the default. Editable preview reveals the active paragraph's source.
+- The Markdown editor supports find/replace, selection matching and multiple cursors. App shortcuts retain their physical key positions across Hebrew and English layouts; editor right-click uses the native editing menu. Tabs support arrow keys, Home/End and save-before-close through Delete.
 - English interface, mixed Hebrew and English notes, automatic direction per paragraph, left-to-right code.
 - Basic Markdown, task lists, syntax-highlighted code, tables, math, images, and wiki links.
 - Note graph groups Markdown notes by workspace and nested folders, using circular hierarchical edge bundling for actual wiki/Markdown links. It supports current/all workspace scope, note search, incoming/outgoing inspection, zoom/pan, and opening notes. Settings → Graph persists bundling strength separately from note files, with 85% as the default.
 - A formatting toolbar toggles with a button.
-- The main title is the first Markdown heading. New filenames follow the title until manually renamed. Empty titles use unique Untitled filenames. Existing filenames are preserved on opening.
-- Autosave indicates saving, saved, or failed, and retains unsaved changes after failure.
+- The main title uses the first body H1, falling back to the filename for notes without headings. Opening or editing the body does not inject an H1. Editing the title explicitly changes or adds it. New filenames follow the title until manually renamed. Empty titles use unique Untitled filenames. Existing filenames are preserved on opening.
+- Autosave indicates saving, saved, failed, or Changed on disk, and retains unsaved changes after failure or conflict. Conflicts pause autosave and offer confirmed Reload, revision-checked Keep mine, or Save a copy.
+- Native filesystem events refresh registered workspaces after a debounce. Hidden and dependency/cache directories are excluded; scan warnings retain prior entries and buffers. Manual and configurable focus refresh remain available.
 - Existing image references render inline. Image files open in zoomable tabs and split panes. No clipboard image insertion or drag-and-drop insertion in v1.
 - Cross-workspace search results switch to the destination workspace. App-initiated moves and renames update incoming links within registered workspaces.
-- Six persisted dark themes: Graphite + amber by default, Ink + jade, Midnight + ice, Charcoal + coral, Forest + moss, and the original One Dark Pro. Appearance settings preview a draft locally and apply it after Save changes. Separate UI and editor font dropdowns list installed Linux font families, with each choice previewed in its own typeface. Font discovery runs when settings opens; selections preview locally and apply on Save changes. UI typography remains independent of editor preferences.
+- Six persisted dark themes: Graphite + amber by default, Ink + jade, Midnight + ice, Charcoal + coral, Forest + moss, and the original One Dark Pro. Appearance settings preview a draft locally and apply it after Save changes. Separate UI and editor font dropdowns list installed Linux font families, with each choice previewed in its own typeface. Font discovery runs on the first settings opening and reuses the result during that app session; failures can retry. Selections preview locally and apply on Save changes. UI typography remains independent of editor preferences.
 - Standard keyboard shortcuts in v1; Vim mode may come later.
 
 ## Current visual direction

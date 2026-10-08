@@ -6,6 +6,8 @@ pub mod model;
 pub mod pathing;
 mod scan_cache;
 pub mod service;
+mod watcher;
+mod workspace_mutations;
 
 use model::{
     Appearance, DeleteResult, NoteFile, Preferences, RenameImageResult, SaveResult, Session,
@@ -14,7 +16,20 @@ use model::{
 use service::{ImageData, MoveFolderResult, Service};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
+
+async fn work_with_roots<T: Send + 'static>(
+    service: tauri::State<'_, Arc<Service>>,
+    watcher: tauri::State<'_, watcher::WorkspaceWatcher>,
+    f: impl FnOnce(Arc<Service>) -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    let result = work(service.clone(), f).await;
+    // A registration may have committed even if its subsequent scan failed.
+    if let Ok((generation, roots)) = work(service, |service| service.registered_roots()).await {
+        watcher.synchronize(generation, roots);
+    }
+    result
+}
 
 async fn work<T: Send + 'static>(
     service: tauri::State<'_, Arc<Service>>,
@@ -27,8 +42,11 @@ async fn work<T: Send + 'static>(
 }
 
 #[tauri::command]
-async fn load_settings(service: tauri::State<'_, Arc<Service>>) -> Result<Settings, String> {
-    work(service, |s| s.load_settings()).await
+async fn load_settings(
+    service: tauri::State<'_, Arc<Service>>,
+    watcher: tauri::State<'_, watcher::WorkspaceWatcher>,
+) -> Result<Settings, String> {
+    work_with_roots(service, watcher, |s| s.load_settings()).await
 }
 #[tauri::command]
 async fn list_fonts(service: tauri::State<'_, Arc<Service>>) -> Result<Vec<String>, String> {
@@ -38,13 +56,17 @@ async fn list_fonts(service: tauri::State<'_, Arc<Service>>) -> Result<Vec<Strin
 async fn ensure_capture_workspace(
     app: tauri::AppHandle,
     service: tauri::State<'_, Arc<Service>>,
+    watcher: tauri::State<'_, watcher::WorkspaceWatcher>,
 ) -> Result<Snapshot, String> {
     let documents = app
         .path()
         .document_dir()
         .or_else(|_| app.path().home_dir().map(|home| home.join("Documents")))
         .map_err(|e| e.to_string())?;
-    work(service, move |s| s.ensure_capture_workspace(&documents)).await
+    work_with_roots(service, watcher, move |s| {
+        s.ensure_capture_workspace(&documents)
+    })
+    .await
 }
 #[tauri::command]
 async fn write_drawing_svg(
@@ -76,9 +98,10 @@ async fn save_sessions(
 #[tauri::command]
 async fn add_workspace(
     service: tauri::State<'_, Arc<Service>>,
+    watcher: tauri::State<'_, watcher::WorkspaceWatcher>,
     path: String,
 ) -> Result<Snapshot, String> {
-    work(service, move |s| s.add_workspace(&path)).await
+    work_with_roots(service, watcher, move |s| s.add_workspace(&path)).await
 }
 #[tauri::command]
 async fn update_workspace(
@@ -108,9 +131,10 @@ async fn set_entry_appearance(
 #[tauri::command]
 async fn remove_workspace(
     service: tauri::State<'_, Arc<Service>>,
+    watcher: tauri::State<'_, watcher::WorkspaceWatcher>,
     workspace_id: String,
 ) -> Result<Settings, String> {
-    work(service, move |s| s.remove_workspace(&workspace_id)).await
+    work_with_roots(service, watcher, move |s| s.remove_workspace(&workspace_id)).await
 }
 #[tauri::command]
 async fn scan_workspace(
@@ -228,6 +252,10 @@ pub fn run() {
             let config_dir = app.path().app_config_dir()?;
             let service = Service::new(config_dir).map_err(std::io::Error::other)?;
             app.manage(Arc::new(service));
+            let handle = app.handle().clone();
+            app.manage(watcher::WorkspaceWatcher::new(move |change| {
+                let _ = handle.emit(watcher::WORKSPACE_CHANGED, change);
+            }));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

@@ -117,6 +117,49 @@ function fixture(
 }
 
 describe("workspace commands", () => {
+  it.each([
+    ["KeyP", "פ", false, "titles"],
+    ["KeyP", "פ", true, "contents"],
+    ["KeyK", "ל", false, "commands"],
+    ["KeyN", "מ", false, "new"],
+    ["KeyN", "מ", true, "capture"],
+    ["KeyD", "ג", true, "daily"],
+    ["KeyS", "ד", false, "save"],
+    ["KeyW", "'", false, "close"],
+    ["Comma", "ת", false, "settings"],
+    ["Backslash", "\\", false, "split"],
+    ["Tab", "Tab", true, "previous-tab"],
+  ])("uses physical %s under a non-Latin layout", (code, key, shiftKey, id) => {
+    expect(
+      commandForShortcut({
+        code,
+        key,
+        ctrlKey: true,
+        metaKey: false,
+        shiftKey,
+        altKey: false,
+      }),
+    ).toBe(id);
+  });
+
+  it("ignores composing and Alt-modified shortcuts and never falls back from a different physical key", () => {
+    const event = {
+      code: "KeyP",
+      key: "p",
+      ctrlKey: true,
+      metaKey: false,
+      shiftKey: false,
+      altKey: false,
+    };
+    expect(commandForShortcut({ ...event, isComposing: true })).toBeNull();
+    expect(commandForShortcut({ ...event, altKey: true })).toBeNull();
+    expect(commandForShortcut({ ...event, code: "KeyQ" })).toBeNull();
+    expect(
+      commandForShortcut({ ...event, ctrlKey: false, metaKey: true }),
+    ).toBe("titles");
+    expect(commandForShortcut({ ...event, code: "" })).toBe("titles");
+  });
+
   it("offers capture and settings without a workspace while refusing workspace actions", async () => {
     const f = fixture({ workspace: null, modal: "none" });
     expect(

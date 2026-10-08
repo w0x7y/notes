@@ -4,7 +4,8 @@
   "description": "Notes desktop window",
   "windows": ["main"],
   "permissions": [
-    "core:default",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
     "core:window:allow-destroy",
     "dialog:allow-open",
     "clipboard-manager:allow-write-text",
