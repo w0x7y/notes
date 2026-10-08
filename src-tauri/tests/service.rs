@@ -8,6 +8,563 @@ fn service() -> (tempfile::TempDir, Service) {
     (config, service)
 }
 
+#[test]
+fn malformed_settings_recover_with_an_exact_backup_and_restart_cleanly() {
+    for original in [b"{truncated".as_slice(), &[0xff, 0xfe], b"[]"] {
+        let config = tempdir().unwrap();
+        let config_file = config.path().join("notes.json");
+        fs::write(&config_file, original).unwrap();
+        let service = Service::new(config.path().to_path_buf()).unwrap();
+        let settings = service.load_settings().unwrap();
+        assert!(settings.workspaces.is_empty());
+        assert_eq!(
+            settings.preferences,
+            notes_lib::model::Preferences::default()
+        );
+        let backups: Vec<_> = fs::read_dir(config.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "bak"))
+            .collect();
+        assert_eq!(backups.len(), 1);
+        assert_eq!(fs::read(&backups[0]).unwrap(), original);
+        let repaired = fs::read(&config_file).unwrap();
+        drop(service);
+        Service::new(config.path().to_path_buf()).unwrap();
+        assert_eq!(fs::read(&config_file).unwrap(), repaired);
+        assert_eq!(fs::read_dir(config.path()).unwrap().count(), 2);
+    }
+}
+
+#[test]
+fn settings_recovery_rejects_nonregular_configs_without_replacing_them() {
+    let config = tempdir().unwrap();
+    let path = config.path().join("notes.json");
+    fs::create_dir(&path).unwrap();
+    assert!(Service::new(config.path().to_path_buf()).is_err());
+    assert!(path.is_dir());
+    assert_eq!(fs::read_dir(config.path()).unwrap().count(), 1);
+    #[cfg(unix)]
+    {
+        fs::remove_dir(&path).unwrap();
+        let original = config.path().join("original.json");
+        fs::write(&original, "{broken").unwrap();
+        std::os::unix::fs::symlink(&original, &path).unwrap();
+        assert!(Service::new(config.path().to_path_buf()).is_err());
+        assert_eq!(fs::read_to_string(&original).unwrap(), "{broken");
+        assert_eq!(fs::read_dir(config.path()).unwrap().count(), 2);
+        fs::remove_file(&path).unwrap();
+        std::os::unix::fs::symlink("missing.json", &path).unwrap();
+        assert!(Service::new(config.path().to_path_buf()).is_err());
+        assert!(fs::symlink_metadata(&path)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+    }
+}
+
+#[test]
+fn invalid_stored_preferences_recover_without_losing_workspace_metadata() {
+    for invalid in [
+        serde_json::json!({"fontSize":99}),
+        serde_json::json!({"theme":"unknown"}),
+        serde_json::json!({"fontSize":"broken"}),
+        serde_json::Value::Null,
+    ] {
+        let (config, service) = service();
+        let root = tempdir().unwrap();
+        let id = service
+            .add_workspace(root.path().to_str().unwrap())
+            .unwrap()
+            .workspace
+            .id;
+        let note = service.create_note(&id, "").unwrap();
+        service
+            .set_entry_appearance(
+                &id,
+                &note.path,
+                notes_lib::model::Appearance {
+                    icon: Some("book-open".into()),
+                    color: Some("#abcdef".into()),
+                },
+            )
+            .unwrap();
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&fs::read(config.path().join("notes.json")).unwrap()).unwrap();
+        value["toolbarVisible"] = serde_json::json!(false);
+        value["sessions"] = serde_json::json!({id.clone(): {
+            "tabs":[note.path], "primary":note.path,"secondary":null,"split":false
+        }});
+        value["preferences"] = invalid;
+        let original = serde_json::to_vec(&value).unwrap();
+        fs::write(config.path().join("notes.json"), &original).unwrap();
+        drop(service);
+        let recovered = Service::new(config.path().to_path_buf()).unwrap();
+        assert!(recovered.read_note(&id, &note.path).unwrap().auto_rename);
+        assert_eq!(
+            recovered.load_settings().unwrap().preferences,
+            notes_lib::model::Preferences::default()
+        );
+        let mut saved: serde_json::Value =
+            serde_json::from_slice(&fs::read(config.path().join("notes.json")).unwrap()).unwrap();
+        saved.as_object_mut().unwrap().remove("preferences");
+        value.as_object_mut().unwrap().remove("preferences");
+        assert_eq!(saved, value);
+        let backup = fs::read_dir(config.path())
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .find(|p| p.extension().is_some_and(|ext| ext == "bak"))
+            .unwrap();
+        assert_eq!(fs::read(backup).unwrap(), original);
+    }
+}
+
+#[test]
+fn failed_workspace_and_session_persistence_preserves_all_in_memory_settings() {
+    let (config, service) = service();
+    let root = tempdir().unwrap();
+    let other = tempdir().unwrap();
+    let workspace = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace;
+    let before = serde_json::to_value(service.load_settings().unwrap()).unwrap();
+    fs::remove_file(config.path().join("notes.json")).unwrap();
+    fs::create_dir(config.path().join("notes.json")).unwrap();
+    assert!(service
+        .add_workspace(other.path().to_str().unwrap())
+        .is_err());
+    assert_eq!(
+        serde_json::to_value(service.load_settings().unwrap()).unwrap(),
+        before
+    );
+    assert!(service
+        .update_workspace(&workspace.id, "Changed", "#abcdef", "folder")
+        .is_err());
+    assert_eq!(
+        serde_json::to_value(service.load_settings().unwrap()).unwrap(),
+        before
+    );
+    assert!(service
+        .save_sessions(std::collections::HashMap::new(), None, false)
+        .is_err());
+    assert_eq!(
+        serde_json::to_value(service.load_settings().unwrap()).unwrap(),
+        before
+    );
+}
+
+#[test]
+fn workspace_appearance_rejects_invalid_colors_and_icons_without_persisting() {
+    let (config, service) = service();
+    let root = tempdir().unwrap();
+    let workspace = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace;
+    let before = fs::read(config.path().join("notes.json")).unwrap();
+    for color in ["red", "#fff", "#gg1234", "#1234567", ""] {
+        assert!(service
+            .update_workspace(&workspace.id, "Valid", color, "book")
+            .is_err());
+    }
+    for icon in [
+        "",
+        "Book",
+        "book icon",
+        "-book",
+        "book-",
+        "book--open",
+        "../book",
+    ] {
+        assert!(service
+            .update_workspace(&workspace.id, "Valid", "#abcdef", icon)
+            .is_err());
+    }
+    assert_eq!(
+        service.load_settings().unwrap().workspaces[0].name,
+        workspace.name
+    );
+    assert_eq!(fs::read(config.path().join("notes.json")).unwrap(), before);
+    assert_eq!(
+        service
+            .update_workspace(&workspace.id, " Valid ", "#ABCDef", "book-open")
+            .unwrap()
+            .name,
+        "Valid"
+    );
+}
+
+#[test]
+fn note_size_limits_reject_reads_and_saves_but_keep_scan_entries() {
+    const LIMIT: u64 = 20 * 1024 * 1024;
+    let (_config, service) = service();
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("small.md"), "# Safe\n").unwrap();
+    let oversized = fs::File::create(root.path().join("large.md")).unwrap();
+    oversized.set_len(LIMIT + 1).unwrap();
+    let snapshot = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap();
+    let entry = snapshot
+        .entries
+        .iter()
+        .find(|entry| entry.path == "large.md")
+        .unwrap();
+    assert_eq!(entry.title, "large");
+    assert!(entry.tags.is_empty());
+    let id = &snapshot.workspace.id;
+    assert!(service
+        .read_note(id, "large.md")
+        .unwrap_err()
+        .contains("20 MiB"));
+    let original = service.read_note(id, "small.md").unwrap();
+    let too_large = "x".repeat((LIMIT + 1) as usize);
+    assert!(service
+        .save_note(id, "small.md", &too_large, &original.revision)
+        .unwrap_err()
+        .contains("20 MiB"));
+    assert_eq!(
+        fs::read_to_string(root.path().join("small.md")).unwrap(),
+        original.content
+    );
+    assert_eq!(
+        service.read_note(id, "small.md").unwrap().revision,
+        original.revision
+    );
+    assert_eq!(service.scan_workspace(id).unwrap().entries.len(), 2);
+}
+
+#[test]
+fn oversized_incoming_link_candidates_report_warnings_without_blocking_a_rename() {
+    let (_config, service) = service();
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("a.md"), "# A").unwrap();
+    fs::write(root.path().join("ref.md"), "[[a]]").unwrap();
+    let large = fs::File::create(root.path().join("large.md")).unwrap();
+    large.set_len(20 * 1024 * 1024 + 1).unwrap();
+    let id = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    let note = service.read_note(&id, "a.md").unwrap();
+    let result = service
+        .rename_note(&id, "a.md", "b.md", &note.revision)
+        .unwrap();
+    assert_eq!(result.note.path, "b.md");
+    assert!(result
+        .warnings
+        .iter()
+        .any(|warning| warning.contains("large.md") && warning.contains("20 MiB")));
+    assert_eq!(
+        fs::read_to_string(root.path().join("ref.md")).unwrap(),
+        "[[b]]"
+    );
+    assert_eq!(
+        fs::metadata(root.path().join("large.md")).unwrap().len(),
+        20 * 1024 * 1024 + 1
+    );
+}
+
+#[test]
+fn automatic_filenames_keep_hebrew_with_a_utf8_byte_limit() {
+    let (_config, service) = service();
+    let root = tempdir().unwrap();
+    let id = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    let title = "שלום".repeat(60);
+    let content = format!("# {title}\n");
+    for suffix in [".md", " 2.md"] {
+        let note = service.create_note(&id, "").unwrap();
+        let saved = service
+            .save_note(&id, &note.path, &content, &note.revision)
+            .unwrap();
+        assert!(saved.warnings.is_empty(), "{:?}", saved.warnings);
+        assert_eq!(
+            saved.note.path,
+            format!("{}{}", "שלום".repeat(22) + "של", suffix)
+        );
+        assert!(saved.note.path.len() <= 255);
+        assert_eq!(
+            service.read_note(&id, &saved.note.path).unwrap().content,
+            content
+        );
+    }
+}
+
+#[test]
+fn folder_and_file_moves_preserve_existing_destinations() {
+    let (_config, service) = service();
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("source")).unwrap();
+    fs::create_dir(root.path().join("destination")).unwrap();
+    fs::write(root.path().join("source/a.md"), "# Source").unwrap();
+    fs::write(root.path().join("existing.md"), "# Existing").unwrap();
+    let id = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    assert!(service.move_folder(&id, "source", "destination").is_err());
+    assert!(root.path().join("destination").is_dir());
+    assert_eq!(
+        fs::read_to_string(root.path().join("source/a.md")).unwrap(),
+        "# Source"
+    );
+    let note = service.read_note(&id, "source/a.md").unwrap();
+    assert!(service
+        .rename_note(&id, &note.path, "existing.md", &note.revision)
+        .is_err());
+    assert_eq!(
+        fs::read_to_string(root.path().join("existing.md")).unwrap(),
+        "# Existing"
+    );
+    assert!(service.move_folder(&id, "source", "moved").is_ok());
+    assert!(!root.path().join("source").exists());
+    assert_eq!(
+        fs::read_to_string(root.path().join("moved/a.md")).unwrap(),
+        "# Source"
+    );
+}
+
+#[test]
+fn new_destinations_reject_every_hidden_or_excluded_directory_component() {
+    let (_config, service) = service();
+    let root = tempdir().unwrap();
+    let excluded = [
+        ".hidden",
+        "node_modules",
+        "__pycache__",
+        "visible/.nested",
+        "visible/node_modules",
+        "visible/__pycache__",
+    ];
+    for folder in excluded {
+        fs::create_dir_all(root.path().join(folder)).unwrap();
+    }
+    fs::create_dir(root.path().join("source")).unwrap();
+    fs::write(root.path().join("a.md"), "# A").unwrap();
+    fs::write(root.path().join("image.png"), "image").unwrap();
+    let id = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    let note = service.read_note(&id, "a.md").unwrap();
+    for folder in excluded {
+        assert!(service.create_note(&id, folder).is_err());
+        assert!(service.create_folder(&id, folder, "child").is_err());
+        assert!(service
+            .rename_note(&id, "a.md", &format!("{folder}/moved.md"), &note.revision)
+            .is_err());
+        assert!(service
+            .rename_image(&id, "image.png", &format!("{folder}/moved.png"))
+            .is_err());
+        assert!(service
+            .move_folder(&id, "source", &format!("{folder}/moved"))
+            .is_err());
+        assert!(fs::read_dir(root.path().join(folder))
+            .unwrap()
+            .next()
+            .is_none());
+    }
+    for name in [".new", "node_modules", "__pycache__"] {
+        assert!(service.create_folder(&id, "visible", name).is_err());
+    }
+    assert_eq!(fs::read_to_string(root.path().join("a.md")).unwrap(), "# A");
+    assert_eq!(
+        fs::read_to_string(root.path().join("image.png")).unwrap(),
+        "image"
+    );
+    assert!(root.path().join("source").is_dir());
+    assert!(service.create_note(&id, "visible").is_ok());
+    assert!(service
+        .rename_note(&id, "a.md", "visible/moved.md", &note.revision)
+        .is_ok());
+    assert!(service
+        .rename_image(&id, "image.png", "visible/moved.png")
+        .is_ok());
+    assert!(service.move_folder(&id, "source", "visible/moved").is_ok());
+}
+
+#[test]
+fn scans_emit_aliases_and_complete_status_without_rewriting_yaml_source() {
+    let (_config, service) = service();
+    let root = tempdir().unwrap();
+    let content = "---\naliases: [Lecture, שיעור]\ntags: [course]\n---\n# Actual title\n";
+    fs::write(root.path().join("a.md"), content).unwrap();
+    let snapshot = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap();
+    assert!(!snapshot.incomplete);
+    assert!(snapshot.warnings.is_empty());
+    assert_eq!(snapshot.entries[0].aliases, vec!["Lecture", "שיעור"]);
+    assert_eq!(snapshot.entries[0].tags, vec!["course"]);
+    let refreshed = service.scan_workspace(&snapshot.workspace.id).unwrap();
+    assert_eq!(refreshed.entries[0].aliases, snapshot.entries[0].aliases);
+    assert_eq!(
+        fs::read_to_string(root.path().join("a.md")).unwrap(),
+        content
+    );
+}
+
+#[test]
+fn a_registered_root_replaced_by_a_file_still_returns_a_hard_scan_error() {
+    let (_config, service) = service();
+    let parent = tempdir().unwrap();
+    let root = parent.path().join("root");
+    fs::create_dir(&root).unwrap();
+    let id = service
+        .add_workspace(root.to_str().unwrap())
+        .unwrap()
+        .workspace
+        .id;
+    fs::remove_dir(&root).unwrap();
+    fs::write(&root, "file").unwrap();
+    assert!(service.scan_workspace(&id).is_err());
+}
+
+#[test]
+fn watcher_root_generations_advance_only_after_committed_registration_changes() {
+    let (config, service) = service();
+    let root = tempdir().unwrap();
+    let other = tempdir().unwrap();
+    assert_eq!(service.registered_roots().unwrap().0, 0);
+    let workspace = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace;
+    let (generation, roots) = service.registered_roots().unwrap();
+    assert_eq!(generation, 1);
+    assert_eq!(roots.len(), 1);
+    service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap();
+    assert_eq!(service.registered_roots().unwrap().0, 1);
+    fs::remove_file(config.path().join("notes.json")).unwrap();
+    fs::create_dir(config.path().join("notes.json")).unwrap();
+    assert!(service
+        .add_workspace(other.path().to_str().unwrap())
+        .is_err());
+    assert!(service.remove_workspace(&workspace.id).is_err());
+    assert_eq!(service.registered_roots().unwrap().0, 1);
+    fs::remove_dir(config.path().join("notes.json")).unwrap();
+    service.remove_workspace(&workspace.id).unwrap();
+    let (generation, roots) = service.registered_roots().unwrap();
+    assert_eq!(generation, 2);
+    assert!(roots.is_empty());
+}
+
+#[test]
+fn metadata_limits_warn_on_warm_scans_but_keep_the_note_and_body_tags() {
+    let (_config, service) = service();
+    let root = tempdir().unwrap();
+    let source = format!(
+        "---\nblob: &blob {}\naliases: [{}]\n---\n# Title\n#body",
+        "x".repeat(1024),
+        vec!["*blob"; 65].join(", ")
+    );
+    fs::write(root.path().join("bounded.md"), &source).unwrap();
+    let initial = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap();
+    for snapshot in [
+        initial,
+        service
+            .scan_workspace(&service.load_settings().unwrap().workspaces[0].id)
+            .unwrap(),
+    ] {
+        assert!(!snapshot.incomplete);
+        assert_eq!(snapshot.entries.len(), 1);
+        assert_eq!(snapshot.entries[0].title, "Title");
+        assert_eq!(snapshot.entries[0].tags, ["body"]);
+        assert!(snapshot.entries[0].aliases.is_empty());
+        assert_eq!(snapshot.warnings.len(), 1);
+        assert!(snapshot.warnings[0].contains("bounded.md: Frontmatter metadata ignored"));
+        assert!(snapshot.warnings[0].contains("64 KiB of strings"));
+        assert_eq!(
+            service
+                .read_note(&snapshot.workspace.id, "bounded.md")
+                .unwrap()
+                .content,
+            source
+        );
+    }
+    assert_eq!(
+        fs::read_to_string(root.path().join("bounded.md")).unwrap(),
+        source
+    );
+    fs::write(root.path().join("removed.md"), "# Removed").unwrap();
+    let id = service.load_settings().unwrap().workspaces[0].id.clone();
+    assert_eq!(service.scan_workspace(&id).unwrap().entries.len(), 2);
+    fs::remove_file(root.path().join("removed.md")).unwrap();
+    let after_removal = service.scan_workspace(&id).unwrap();
+    assert!(!after_removal.incomplete);
+    assert_eq!(after_removal.entries.len(), 1);
+}
+
+#[test]
+fn folder_moves_reject_registered_workspace_overlap_before_changing_files_or_settings() {
+    use notes_lib::model::Session;
+    use std::collections::HashMap;
+    let (_config, service) = service();
+    let root = tempdir().unwrap();
+    fs::create_dir_all(root.path().join("Shared/Child")).unwrap();
+    fs::create_dir(root.path().join("Ordinary")).unwrap();
+    fs::write(root.path().join("Shared/Child/note.md"), "# Note").unwrap();
+    fs::write(root.path().join("ref.md"), "[[Shared/Child/note]]").unwrap();
+    let parent = service
+        .add_workspace(root.path().to_str().unwrap())
+        .unwrap()
+        .workspace;
+    let child = service
+        .add_workspace(root.path().join("Shared").to_str().unwrap())
+        .unwrap()
+        .workspace;
+    service
+        .save_sessions(
+            HashMap::from([(
+                child.id.clone(),
+                Session {
+                    tabs: vec!["Child/note.md".into()],
+                    primary: Some("Child/note.md".into()),
+                    secondary: None,
+                    split: false,
+                },
+            )]),
+            Some(child.id.clone()),
+            true,
+        )
+        .unwrap();
+    let before = serde_json::to_value(service.load_settings().unwrap()).unwrap();
+    for (id, source, destination) in [
+        (&parent.id, "Shared", "Renamed"),
+        (&child.id, "Child", "Renamed"),
+    ] {
+        let error = service.move_folder(id, source, destination).err().unwrap();
+        assert!(error.contains("overlaps another open workspace"));
+        assert_eq!(
+            serde_json::to_value(service.load_settings().unwrap()).unwrap(),
+            before
+        );
+        assert!(service.scan_workspace(&parent.id).is_ok());
+        assert!(service.scan_workspace(&child.id).is_ok());
+        assert_eq!(
+            fs::read_to_string(root.path().join("ref.md")).unwrap(),
+            "[[Shared/Child/note]]"
+        );
+        assert!(root.path().join("Shared/Child/note.md").is_file());
+    }
+    service
+        .move_folder(&parent.id, "Ordinary", "Moved")
+        .unwrap();
+    assert!(root.path().join("Moved").is_dir());
+}
+
 // Run blocking-file probes in a child so a regression cannot hang the test suite.
 #[cfg(unix)]
 #[test]
@@ -622,7 +1179,7 @@ fn sessions_and_workspace_metadata_persist_outside_notes() {
         .unwrap()
         .workspace;
     service
-        .update_workspace(&workspace.id, "School", "#abc", "book")
+        .update_workspace(&workspace.id, "School", "#aabbcc", "book")
         .unwrap();
     let sessions = serde_json::json!({workspace.id.clone(): {"tabs": ["a.md"], "primary": "a.md", "secondary": null, "split": false}});
     service
@@ -901,7 +1458,7 @@ fn rename_returns_committed_path_and_warning_if_config_write_fails() {
 }
 
 #[test]
-fn autosave_reports_new_revision_when_automatic_rename_fails() {
+fn long_multibyte_titles_auto_rename_without_warnings_and_keep_revision() {
     let (_config, service) = service();
     let root = tempdir().unwrap();
     let selected = service
@@ -913,11 +1470,11 @@ fn autosave_reports_new_revision_when_automatic_rename_fails() {
     let result = service
         .save_note(id, &created.path, &content, &created.revision)
         .unwrap();
-    assert_eq!(result.path, created.path);
+    assert_eq!(result.path, format!("{}.md", "界".repeat(60)));
     assert_eq!(result.content, content);
-    assert!(!result.warnings.is_empty());
+    assert!(result.warnings.is_empty());
     assert_eq!(
-        service.read_note(id, &created.path).unwrap().revision,
+        service.read_note(id, &result.path).unwrap().revision,
         result.revision
     );
 }

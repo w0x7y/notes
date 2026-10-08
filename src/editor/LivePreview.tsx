@@ -11,9 +11,11 @@ import {
 import DOMPurify from "dompurify";
 import "katex/dist/katex.min.css";
 import type { NoteDocument } from "../domain/document";
+import type { Entry } from "../domain/contracts";
 import { relativePath, splitNote, withBody } from "../domain/notes";
 import { useApp, showError } from "../domain/app-store";
 import { files, openExternalLink } from "../platform";
+import { ImageCache } from "../platform/image-cache";
 import { CodeEditor, type EditorHandle } from "./CodeEditor";
 import { markdownBlocks } from "./markdown";
 const DrawingPreview = lazy(() =>
@@ -21,6 +23,10 @@ const DrawingPreview = lazy(() =>
     default: module.DrawingPreview,
   })),
 );
+const images = new ImageCache((workspaceId, path) =>
+  files.readImage(workspaceId, path),
+);
+const noEntries: Entry[] = [];
 
 type Props = {
   document: NoteDocument;
@@ -42,33 +48,42 @@ export const LivePreview = memo(function LivePreview({
   const [body, setBody] = useState(() => splitNote(document.content).body);
   const [active, setActive] = useState<number | null>(null);
   const host = useRef<HTMLDivElement>(null);
+  const entries = useApp(
+    (state) => state.entries[document.workspaceId] ?? noEntries,
+  );
+  const notePath = document.getSnapshot().path;
   useEffect(() => {
     setBody(splitNote(document.content).body);
     setActive(null);
   }, [document, externalVersion]);
-  const blocks = useMemo(
-    () =>
-      markdownBlocks(body).map((block) => ({
+  const blocks = useMemo(() => {
+    const occurrences = new Map<string, number>();
+    return markdownBlocks(body).map((block) => {
+      const occurrence = occurrences.get(block.source) ?? 0;
+      occurrences.set(block.source, occurrence + 1);
+      return {
         ...block,
+        // Exact content plus duplicate order keeps later drawings mounted when
+        // a preceding paragraph is inserted. Offsets and indices cannot do that.
+        key: `${block.source}\u0000${occurrence}`,
         html:
           DOMPurify.sanitize(block.html, {
             ADD_ATTR: ["data-note-target", "data-local-src", "dir"],
             ADD_TAGS: ["math", "semantics", "annotation"],
           }) || '<p class="preview-placeholder">Click to start writing…</p>',
-      })),
-    [body],
-  );
+      };
+    });
+  }, [body]);
 
   useEffect(() => {
     let cancelled = false;
-    const images =
+    const elements =
       host.current?.querySelectorAll<HTMLImageElement>("img[data-local-src]") ??
       [];
-    for (const element of images) {
+    for (const element of elements) {
       const target = element.dataset.localSrc;
-      if (!target || element.src) continue;
-      const entries = useApp.getState().entries[document.workspaceId] ?? [];
-      const local = relativePath(document.getSnapshot().path, target);
+      if (!target) continue;
+      const local = relativePath(notePath, target);
       const path =
         entries.find(
           (entry) =>
@@ -80,11 +95,18 @@ export const LivePreview = memo(function LivePreview({
             entry.kind === "image" && entry.path.split("/").at(-1) === target,
         )?.path;
       if (!path) {
+        element.removeAttribute("src");
         element.alt = `Image not found: ${target}`;
         continue;
       }
-      void files
-        .readImage(document.workspaceId, path)
+      const modified =
+        entries.find((entry) => entry.path === path)?.modified ?? 0;
+      const cacheKey = JSON.stringify([document.workspaceId, path, modified]);
+      if (element.src && element.dataset.imageCacheKey === cacheKey) continue;
+      element.dataset.imageCacheKey = cacheKey;
+      element.removeAttribute("src");
+      void images
+        .readImage(document.workspaceId, path, modified)
         .then((image) => {
           if (!cancelled)
             element.src = `data:${image.mime};base64,${image.data}`;
@@ -96,7 +118,7 @@ export const LivePreview = memo(function LivePreview({
     return () => {
       cancelled = true;
     };
-  }, [body, active, document]);
+  }, [blocks, active, document, entries, notePath]);
 
   const finish = () => {
     setBody(splitNote(document.content).body);
@@ -107,7 +129,7 @@ export const LivePreview = memo(function LivePreview({
       {blocks.map((block, index) =>
         block.drawing !== undefined ? (
           <Suspense
-            key={index}
+            key={block.key}
             fallback={<p className="muted">Loading drawing…</p>}
           >
             <DrawingPreview
@@ -116,7 +138,7 @@ export const LivePreview = memo(function LivePreview({
             />
           </Suspense>
         ) : active === index ? (
-          <div className="preview-source" key={index}>
+          <div className="preview-source" key={block.key}>
             <CodeEditor
               ref={editorRef}
               value={block.source}
@@ -141,12 +163,18 @@ export const LivePreview = memo(function LivePreview({
           </div>
         ) : (
           <div
-            key={index}
+            key={block.key}
             className="preview-block"
+            role="button"
+            aria-disabled={!editable}
             tabIndex={0}
             aria-label="Edit this Markdown block"
             onKeyDown={(event) => {
-              if (event.key === "Enter" && document.getSnapshot().editable) {
+              if (
+                event.target === event.currentTarget &&
+                (event.key === "Enter" || event.key === " ") &&
+                document.getSnapshot().editable
+              ) {
                 event.preventDefault();
                 setActive(index);
               }

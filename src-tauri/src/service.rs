@@ -1,27 +1,24 @@
-use crate::incoming_links::rewrite_incoming;
-use crate::markdown::first_h1;
 use crate::model::{
     Appearance, DeleteResult, Entry, NoteFile, Preferences, RenameImageResult, Rewrite, SaveResult,
-    Session, Settings, Snapshot, Stored, Workspace,
+    Session, Settings, Snapshot, Workspace,
 };
-use crate::pathing::{
-    clean_filename, normalized_relative, open_regular, read_regular_text, relative, resolve,
-    unique_file,
-};
+use crate::pathing::{open_regular, read_note_text, resolve};
 use crate::scan_cache::ScanCache;
+use crate::workspace_mutations::WorkspaceMutations;
+#[cfg(test)]
+use crate::workspace_mutations::{move_file_by_link, move_without_overwrite};
 use base64::Engine;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
-use std::fs::{self, OpenOptions};
-use std::io::{Read, Write};
+use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+#[cfg(test)]
+use std::sync::Mutex;
 use std::time::UNIX_EPOCH;
-use tempfile::NamedTempFile;
 use walkdir::WalkDir;
 
-// Apply the same boundary to indexing and incoming-link rewrites. Explicitly
-// chosen workspace roots remain readable, even when their name is excluded.
 pub(crate) fn workspace_entry(entry: &walkdir::DirEntry) -> bool {
     if !entry.file_type().is_dir() && !entry.file_type().is_file() {
         return false;
@@ -33,11 +30,46 @@ pub(crate) fn workspace_entry(entry: &walkdir::DirEntry) -> bool {
     !name.starts_with('.') && !matches!(name.as_ref(), "node_modules" | "__pycache__")
 }
 
+pub(crate) fn is_image(path: &Path) -> bool {
+    path.extension()
+        .and_then(|s| s.to_str())
+        .is_some_and(|ext| {
+            ["png", "jpg", "jpeg", "gif", "webp", "svg", "avif"]
+                .iter()
+                .any(|supported| ext.eq_ignore_ascii_case(supported))
+        })
+}
+
+pub(crate) fn is_note(path: &Path) -> bool {
+    path.extension()
+        .and_then(|s| s.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+}
+
+pub(crate) fn err(context: &str, error: impl std::fmt::Display) -> String {
+    format!("{context}: {error}")
+}
+
+pub(crate) fn revision(content: &str) -> String {
+    hex::encode(Sha256::digest(content.as_bytes()))
+}
+
+pub(crate) fn note_content(path: &Path) -> Result<String, String> {
+    if path
+        .extension()
+        .and_then(|v| v.to_str())
+        .is_none_or(|ext| !ext.eq_ignore_ascii_case("md"))
+    {
+        return Err("Only Markdown notes can be opened".into());
+    }
+    read_note_text(path).map_err(|e| err("Cannot read note", e))
+}
+
 pub struct Service {
-    config_file: PathBuf,
-    state: Mutex<Stored>,
-    scan_cache: ScanCache,
-    trash: Arc<dyn Trash>,
+    mutations: WorkspaceMutations,
+    scan_cache: Arc<ScanCache>,
+    #[cfg(test)]
+    read_pause: Mutex<Option<crate::scan_cache::ReadPause>>,
 }
 
 #[derive(serde::Serialize)]
@@ -59,122 +91,111 @@ impl Trash for DesktopTrash {
     }
 }
 
-pub(crate) fn is_image(path: &Path) -> bool {
-    path.extension()
-        .and_then(|s| s.to_str())
-        .is_some_and(|ext| {
-            ["png", "jpg", "jpeg", "gif", "webp", "svg", "avif"]
-                .iter()
-                .any(|supported| ext.eq_ignore_ascii_case(supported))
-        })
-}
-
-pub(crate) fn is_note(path: &Path) -> bool {
-    path.extension()
-        .and_then(|s| s.to_str())
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
-}
-
-fn move_appearance(settings: &mut Settings, id: &str, old: &str, new: &str) {
-    if let Some(appearance) = settings.appearances.get_mut(id) {
-        if let Some(value) = appearance.remove(old) {
-            appearance.insert(new.into(), value);
-        }
-    }
-}
-
-fn move_session_path(settings: &mut Settings, id: &str, old: &str, new: &str) {
-    if let Some(session) = settings.sessions.get_mut(id) {
-        for tab in &mut session.tabs {
-            if tab == old {
-                *tab = new.into();
-            }
-        }
-        if session.primary.as_deref() == Some(old) {
-            session.primary = Some(new.into());
-        }
-        if session.secondary.as_deref() == Some(old) {
-            session.secondary = Some(new.into());
-        }
-    }
-}
-
-fn remap_tree_path(path: &str, old: &str, new: &str) -> Option<String> {
-    (path == old || path.starts_with(&format!("{old}/")))
-        .then(|| format!("{new}{}", &path[old.len()..]))
-}
-
-fn remove_session_path(settings: &mut Settings, id: &str, path: &str, folder: bool) {
-    let matches = |candidate: &str| {
-        candidate == path || (folder && candidate.starts_with(&format!("{path}/")))
-    };
-    if let Some(session) = settings.sessions.get_mut(id) {
-        session.tabs.retain(|tab| !matches(tab));
-        if session.primary.as_deref().is_some_and(matches) {
-            session.primary = None;
-        }
-        if session.secondary.as_deref().is_some_and(matches) {
-            session.secondary = None;
-        }
-        if session.primary.is_none() && session.secondary.is_some() {
-            session.primary = session.secondary.take();
-        }
-        if session.secondary.is_none() {
-            session.split = false;
-        }
-    }
-}
-fn err(context: &str, error: impl std::fmt::Display) -> String {
-    format!("{context}: {error}")
-}
-pub(crate) fn revision(content: &str) -> String {
-    hex::encode(Sha256::digest(content.as_bytes()))
-}
-fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    let parent = path.parent().ok_or("Invalid file path")?;
-    let mut temp =
-        NamedTempFile::new_in(parent).map_err(|e| err("Cannot create temporary file", e))?;
-    if let Ok(metadata) = fs::symlink_metadata(path) {
-        if metadata.file_type().is_symlink() {
-            return Err("Refusing to replace a symlink".into());
-        }
-        fs::set_permissions(temp.path(), metadata.permissions())
-            .map_err(|e| err("Cannot preserve file permissions", e))?;
-    }
-    temp.write_all(bytes)
-        .map_err(|e| err("Cannot write temporary file", e))?;
-    temp.as_file()
-        .sync_all()
-        .map_err(|e| err("Cannot sync temporary file", e))?;
-    temp.persist(path)
-        .map_err(|e| err("Cannot replace file", e.error))?;
-    fs::File::open(parent)
-        .map_err(|e| err("Cannot open parent directory", e))?
-        .sync_all()
-        .map_err(|e| err("Cannot sync parent directory", e))
-}
-fn note_content(path: &Path) -> Result<String, String> {
-    if path
-        .extension()
-        .and_then(|v| v.to_str())
-        .is_none_or(|ext| !ext.eq_ignore_ascii_case("md"))
-    {
-        return Err("Only Markdown notes can be opened".into());
-    }
-    read_regular_text(path).map_err(|e| err("Cannot read note", e))
-}
-fn workspace<'a>(settings: &'a Settings, id: &str) -> Result<&'a Workspace, String> {
-    settings
-        .workspaces
-        .iter()
-        .find(|w| w.id == id)
-        .ok_or_else(|| "Workspace is not registered".into())
-}
-fn key(id: &str, path: &str) -> String {
-    format!("{id}\0{path}")
-}
-
 impl Service {
+    pub fn load_settings(&self) -> Result<Settings, String> {
+        self.mutations.load_settings()
+    }
+
+    pub fn registered_roots(&self) -> Result<(u64, Vec<Workspace>), String> {
+        self.mutations.registered_roots()
+    }
+
+    pub fn save_preferences(&self, preferences: Preferences) -> Result<Preferences, String> {
+        self.mutations.save_preferences(preferences)
+    }
+
+    pub fn save_sessions(
+        &self,
+        sessions: HashMap<String, Session>,
+        active_workspace_id: Option<String>,
+        toolbar_visible: bool,
+    ) -> Result<(), String> {
+        self.mutations
+            .save_sessions(sessions, active_workspace_id, toolbar_visible)
+    }
+
+    pub fn update_workspace(
+        &self,
+        id: &str,
+        name: &str,
+        color: &str,
+        icon: &str,
+    ) -> Result<Workspace, String> {
+        self.mutations.update_workspace(id, name, color, icon)
+    }
+
+    pub fn set_entry_appearance(
+        &self,
+        id: &str,
+        path: &str,
+        appearance: Appearance,
+    ) -> Result<Appearance, String> {
+        self.mutations.set_entry_appearance(id, path, appearance)
+    }
+
+    pub fn remove_workspace(&self, id: &str) -> Result<Settings, String> {
+        self.mutations.remove_workspace(id)
+    }
+
+    pub fn write_drawing_svg(&self, id: &str, svg: &str) -> Result<String, String> {
+        self.mutations.write_drawing_svg(id, svg)
+    }
+
+    pub fn create_note(&self, id: &str, folder: &str) -> Result<NoteFile, String> {
+        self.mutations.create_note(id, folder)
+    }
+
+    pub fn save_note(
+        &self,
+        id: &str,
+        path: &str,
+        content: &str,
+        expected: &str,
+    ) -> Result<SaveResult, String> {
+        self.mutations.save_note(id, path, content, expected)
+    }
+
+    pub fn rename_note(
+        &self,
+        id: &str,
+        path: &str,
+        name: &str,
+        expected: &str,
+    ) -> Result<SaveResult, String> {
+        self.mutations.rename_note(id, path, name, expected)
+    }
+
+    pub fn rename_image(
+        &self,
+        id: &str,
+        path: &str,
+        name: &str,
+    ) -> Result<RenameImageResult, String> {
+        self.mutations.rename_image(id, path, name)
+    }
+
+    pub fn delete_file(
+        &self,
+        id: &str,
+        path: &str,
+        expected: Option<&str>,
+    ) -> Result<DeleteResult, String> {
+        self.mutations.delete_file(id, path, expected)
+    }
+
+    pub fn create_folder(&self, id: &str, parent: &str, name: &str) -> Result<(), String> {
+        self.mutations.create_folder(id, parent, name)
+    }
+
+    pub fn move_folder(
+        &self,
+        id: &str,
+        path: &str,
+        destination: &str,
+    ) -> Result<MoveFolderResult, String> {
+        self.mutations.move_folder(id, path, destination)
+    }
+
     pub fn list_fonts(&self) -> Result<Vec<String>, String> {
         crate::fonts::list_families()
     }
@@ -184,268 +205,41 @@ impl Service {
     }
 
     pub fn with_trash(config_dir: PathBuf, trash: Arc<dyn Trash>) -> Result<Self, String> {
-        fs::create_dir_all(&config_dir)
-            .map_err(|e| err("Cannot create app config directory", e))?;
-        let config_file = config_dir.join("notes.json");
-        let state: Stored = if config_file.exists() {
-            serde_json::from_str(
-                &read_regular_text(&config_file).map_err(|e| err("Cannot read settings", e))?,
-            )
-            .map_err(|e| err("Cannot parse settings", e))?
-        } else {
-            Stored::default()
-        };
-        state.settings.preferences.validate()?;
+        let scan_cache = Arc::new(ScanCache::default());
         Ok(Self {
-            config_file,
-            state: Mutex::new(state),
-            scan_cache: ScanCache::default(),
-            trash,
+            mutations: WorkspaceMutations::new(config_dir, trash, scan_cache.clone())?,
+            scan_cache,
+            #[cfg(test)]
+            read_pause: Mutex::new(None),
         })
     }
-    fn write_note_file(&self, path: &Path, bytes: &[u8]) -> Result<(), String> {
-        // Do not wait on the cache between revision validation and the actual write.
-        let result = atomic_write(path, bytes);
-        self.scan_cache.invalidate(path);
-        result
-    }
-    fn move_file(&self, source: &Path, target: &Path) -> Result<(), String> {
-        let result = move_without_overwrite(source, target);
-        self.scan_cache.invalidate(source);
-        self.scan_cache.invalidate(target);
-        result
-    }
-    fn persist(&self, state: &Stored) -> Result<(), String> {
-        atomic_write(
-            &self.config_file,
-            &serde_json::to_vec_pretty(state).map_err(|e| err("Cannot encode settings", e))?,
-        )
-    }
-    pub fn load_settings(&self) -> Result<Settings, String> {
-        Ok(self
-            .state
-            .lock()
-            .map_err(|_| "Settings lock failed")?
-            .settings
-            .clone())
-    }
-    pub fn save_preferences(&self, preferences: Preferences) -> Result<Preferences, String> {
-        preferences.validate()?;
-        let mut state = self.state.lock().map_err(|_| "Settings lock failed")?;
-        let mut next = state.clone();
-        next.settings.preferences = preferences.clone();
-        self.persist(&next)?;
-        *state = next;
-        Ok(preferences)
-    }
 
-    pub fn set_entry_appearance(
-        &self,
-        id: &str,
-        path: &str,
-        appearance: Appearance,
-    ) -> Result<Appearance, String> {
-        if appearance.icon.as_ref().is_some_and(|icon| {
-            icon.is_empty()
-                || icon.starts_with('-')
-                || icon.ends_with('-')
-                || icon.contains("--")
-                || !icon
-                    .chars()
-                    .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-')
-        }) {
-            return Err("Icon must be a Lucide kebab-case ID".into());
-        }
-        if appearance.color.as_ref().is_some_and(|color| {
-            color.len() != 7
-                || !color.starts_with('#')
-                || !color[1..].bytes().all(|byte| byte.is_ascii_hexdigit())
-        }) {
-            return Err("Color must be #RRGGBB".into());
-        }
-        let mut state = self.state.lock().map_err(|_| "Settings lock failed")?;
-        let selected = workspace(&state.settings, id)?;
-        let target = resolve(Path::new(&selected.path), path, false)?;
-        let metadata = fs::symlink_metadata(&target).map_err(|e| err("Cannot inspect entry", e))?;
-        if !metadata.is_dir() && !(metadata.is_file() && (is_note(&target) || is_image(&target))) {
-            return Err("Appearance requires a note, image, or folder".into());
-        }
-        let mut next = state.clone();
-        let entries = next.settings.appearances.entry(id.into()).or_default();
-        if appearance == Appearance::default() {
-            entries.remove(path);
-        } else {
-            entries.insert(path.into(), appearance.clone());
-        }
-        if entries.is_empty() {
-            next.settings.appearances.remove(id);
-        }
-        self.persist(&next)?;
-        *state = next;
-        Ok(appearance)
-    }
-
-    pub fn remove_workspace(&self, id: &str) -> Result<Settings, String> {
-        let mut state = self.state.lock().map_err(|_| "Settings lock failed")?;
-        let root = PathBuf::from(&workspace(&state.settings, id)?.path);
-        let mut next = state.clone();
-        next.settings
-            .workspaces
-            .retain(|workspace| workspace.id != id);
-        next.settings.sessions.remove(id);
-        next.settings.appearances.remove(id);
-        next.auto_names
-            .retain(|name, _| !name.starts_with(&format!("{id}\0")));
-        if next.settings.active_workspace_id.as_deref() == Some(id) {
-            next.settings.active_workspace_id =
-                next.settings.workspaces.first().map(|w| w.id.clone());
-        }
-        self.persist(&next)?;
-        *state = next;
-        self.scan_cache.remove_root(&root);
-        Ok(state.settings.clone())
-    }
-    pub fn save_sessions(
-        &self,
-        sessions: HashMap<String, Session>,
-        active_workspace_id: Option<String>,
-        toolbar_visible: bool,
-    ) -> Result<(), String> {
-        let mut state = self.state.lock().map_err(|_| "Settings lock failed")?;
-        if let Some(ref id) = active_workspace_id {
-            workspace(&state.settings, id)?;
-        }
-        state.settings.sessions = sessions;
-        state.settings.active_workspace_id = active_workspace_id;
-        state.settings.toolbar_visible = toolbar_visible;
-        self.persist(&state)
-    }
-    pub fn add_workspace(&self, path: &str) -> Result<Snapshot, String> {
-        let root = Path::new(path)
-            .canonicalize()
-            .map_err(|e| err("Cannot open workspace", e))?;
-        if !root.is_dir() {
-            return Err("Workspace must be a folder".into());
-        }
-        let mut state = self.state.lock().map_err(|_| "Settings lock failed")?;
-        let canonical = root.to_string_lossy().to_string();
-        let selected = if let Some(existing) = state
-            .settings
-            .workspaces
-            .iter()
-            .find(|w| w.path == canonical)
-        {
-            existing.clone()
-        } else {
-            let selected = Workspace {
-                id: uuid::Uuid::new_v4().to_string(),
-                name: root
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string(),
-                path: canonical,
-                color: "#61afef".into(),
-                icon: "book".into(),
-            };
-            state.settings.workspaces.push(selected.clone());
-            if state.settings.active_workspace_id.is_none() {
-                state.settings.active_workspace_id = Some(selected.id.clone());
+    #[cfg(test)]
+    fn pause_read(&self, path: &Path) {
+        let pause = {
+            let mut pending = self.read_pause.lock().unwrap();
+            if pending.as_ref().is_some_and(|pause| pause.path == path) {
+                pending.take()
+            } else {
+                None
             }
-            self.persist(&state)?;
-            selected
         };
-        drop(state);
+        if let Some(pause) = pause {
+            let _ = pause.entered.send(());
+            let _ = pause.resume.recv_timeout(std::time::Duration::from_secs(5));
+        }
+    }
+
+    pub fn add_workspace(&self, path: &str) -> Result<Snapshot, String> {
+        let selected = self.mutations.add_workspace(path)?;
         self.scan(&selected)
     }
+
     pub fn ensure_capture_workspace(&self, documents: &Path) -> Result<Snapshot, String> {
-        fs::create_dir_all(documents).map_err(|e| err("Cannot create Documents directory", e))?;
-        let documents = documents
-            .canonicalize()
-            .map_err(|e| err("Cannot resolve Documents directory", e))?;
-        let root = resolve(&documents, "Quick Notes", false)?;
-        fs::create_dir_all(&root).map_err(|e| err("Cannot create Quick Notes workspace", e))?;
-        for name in ["Inbox", "Daily"] {
-            let folder = resolve(&root, name, false)?;
-            fs::create_dir_all(folder).map_err(|e| err("Cannot create capture folder", e))?;
-        }
-        self.add_workspace(root.to_str().ok_or("Workspace path is not valid UTF-8")?)
+        let selected = self.mutations.ensure_capture_workspace(documents)?;
+        self.scan(&selected)
     }
-    pub fn write_drawing_svg(&self, id: &str, svg: &str) -> Result<String, String> {
-        crate::drawing::validate_svg(svg)?;
-        let state = self.state.lock().map_err(|_| "Settings lock failed")?;
-        let selected = workspace(&state.settings, id)?;
-        let root = Path::new(&selected.path);
-        for folder in ["assets", "assets/drawings"] {
-            let target = resolve(root, folder, false)?;
-            fs::create_dir_all(target)
-                .map_err(|e| err("Cannot create drawing assets folder", e))?;
-        }
-        let relative = format!("assets/drawings/{}.svg", revision(svg));
-        let target = resolve(root, &relative, false)?;
-        if target.exists() {
-            let file = open_regular(&target).map_err(|e| err("Cannot read drawing preview", e))?;
-            let mut existing = Vec::new();
-            let length = svg.len() as u64;
-            if file
-                .metadata()
-                .map_err(|e| err("Cannot inspect drawing preview", e))?
-                .len()
-                != length
-            {
-                return Err(
-                    "Existing drawing preview has changed; refusing to overwrite it".into(),
-                );
-            }
-            file.take(length + 1)
-                .read_to_end(&mut existing)
-                .map_err(|e| err("Cannot read drawing preview", e))?;
-            if existing != svg.as_bytes() {
-                return Err(
-                    "Existing drawing preview has changed; refusing to overwrite it".into(),
-                );
-            }
-        } else {
-            let parent = target.parent().ok_or("Invalid drawing preview path")?;
-            let mut temp = NamedTempFile::new_in(parent)
-                .map_err(|e| err("Cannot create drawing preview", e))?;
-            temp.write_all(svg.as_bytes())
-                .map_err(|e| err("Cannot write drawing preview", e))?;
-            temp.as_file()
-                .sync_all()
-                .map_err(|e| err("Cannot sync drawing preview", e))?;
-            temp.persist_noclobber(&target)
-                .map_err(|e| err("Cannot publish drawing preview", e.error))?;
-            fs::File::open(parent)
-                .and_then(|file| file.sync_all())
-                .map_err(|e| err("Cannot sync drawing folder", e))?;
-        }
-        Ok(relative)
-    }
-    pub fn update_workspace(
-        &self,
-        id: &str,
-        name: &str,
-        color: &str,
-        icon: &str,
-    ) -> Result<Workspace, String> {
-        let mut state = self.state.lock().map_err(|_| "Settings lock failed")?;
-        let selected = state
-            .settings
-            .workspaces
-            .iter_mut()
-            .find(|w| w.id == id)
-            .ok_or("Workspace is not registered")?;
-        if name.trim().is_empty() {
-            return Err("Workspace name cannot be empty".into());
-        }
-        selected.name = name.trim().to_string();
-        selected.color = color.into();
-        selected.icon = icon.into();
-        let result = selected.clone();
-        self.persist(&state)?;
-        Ok(result)
-    }
+
     fn scan(&self, selected: &Workspace) -> Result<Snapshot, String> {
         let root = Path::new(&selected.path)
             .canonicalize()
@@ -453,14 +247,27 @@ impl Service {
         if root != Path::new(&selected.path) {
             return Err("Registered workspace folder has moved or become a symlink".into());
         }
+        fs::read_dir(&root).map_err(|error| err("Cannot open workspace folder", error))?;
         let mut seen = HashSet::new();
         let mut entries = Vec::new();
+        let mut warnings = Vec::new();
+        let mut incomplete = false;
         let walk = WalkDir::new(&root)
             .follow_links(false)
             .into_iter()
             .filter_entry(workspace_entry);
         for found in walk {
-            let found = found.map_err(|e| err("Cannot scan workspace", e))?;
+            let found = match found {
+                Ok(found) => found,
+                Err(error) => {
+                    if error.depth() == 0 {
+                        return Err(err("Cannot open workspace folder", error));
+                    }
+                    warnings.push(err("Cannot scan part of workspace", error));
+                    incomplete = true;
+                    continue;
+                }
+            };
             if found.depth() == 0 {
                 continue;
             }
@@ -484,15 +291,35 @@ impl Service {
             } else {
                 continue;
             };
-            let metadata = found
-                .metadata()
-                .map_err(|e| err("Cannot read file metadata", e))?;
-            let (title, tags) = if kind == "note" {
-                seen.insert(path.to_path_buf());
-                self.scan_cache.metadata(&root, path, &metadata)
-            } else {
-                (None, Vec::new())
+            #[cfg(test)]
+            self.pause_read(path);
+            let metadata = match found.metadata() {
+                Ok(metadata) => metadata,
+                Err(error) => {
+                    warnings.push(err("Cannot read entry metadata", error));
+                    incomplete = true;
+                    continue;
+                }
             };
+            let (title, tags, aliases, warning) = if kind == "note" {
+                seen.insert(path.to_path_buf());
+                match self.scan_cache.metadata(&root, path, &metadata) {
+                    Ok(metadata) => metadata,
+                    Err(error) => {
+                        warnings.push(err(
+                            &format!("Cannot read note metadata ({path_str})"),
+                            error,
+                        ));
+                        incomplete = true;
+                        continue;
+                    }
+                }
+            } else {
+                (None, Vec::new(), Vec::new(), None)
+            };
+            if let Some(warning) = warning {
+                warnings.push(format!("{path_str}: {warning}"));
+            }
             let title = title.unwrap_or_else(|| {
                 path.file_stem()
                     .unwrap_or_default()
@@ -509,482 +336,46 @@ impl Service {
                 kind: kind.into(),
                 title,
                 tags,
+                aliases,
                 modified,
             });
         }
-        self.scan_cache.finish(&root, &seen);
+        if !incomplete {
+            self.scan_cache.finish(&root, &seen);
+        }
         entries.sort_by(|a, b| a.path.cmp(&b.path));
         Ok(Snapshot {
             workspace: selected.clone(),
             entries,
+            incomplete,
+            warnings,
         })
     }
+
     pub fn scan_workspace(&self, id: &str) -> Result<Snapshot, String> {
-        let selected = workspace(
-            &self
-                .state
-                .lock()
-                .map_err(|_| "Settings lock failed")?
-                .settings,
-            id,
-        )?
-        .clone();
+        let (selected, _) = self.mutations.read_context(id, "")?;
         self.scan(&selected)
     }
+
     pub fn read_note(&self, id: &str, path: &str) -> Result<NoteFile, String> {
-        let state = self.state.lock().map_err(|_| "Settings lock failed")?;
-        let selected = workspace(&state.settings, id)?;
-        let content = note_content(&resolve(Path::new(&selected.path), path, false)?)?;
+        let (selected, auto_rename) = self.mutations.read_context(id, path)?;
+        let full = resolve(Path::new(&selected.path), path, false)?;
+        #[cfg(test)]
+        self.pause_read(&full);
+        let content = note_content(&full)?;
         Ok(NoteFile {
             path: path.into(),
             revision: revision(&content),
             content,
-            auto_rename: state
-                .auto_names
-                .get(&key(id, path))
-                .copied()
-                .unwrap_or(false),
-        })
-    }
-    pub fn create_note(&self, id: &str, folder: &str) -> Result<NoteFile, String> {
-        let mut state = self.state.lock().map_err(|_| "Settings lock failed")?;
-        let selected = workspace(&state.settings, id)?.clone();
-        let root = Path::new(&selected.path);
-        let parent = resolve(root, folder, true)?;
-        if !parent.is_dir() {
-            return Err("Note folder does not exist".into());
-        }
-        let target = loop {
-            let candidate = unique_file(&parent, "Untitled", None)?;
-            match OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&candidate)
-            {
-                Ok(file) => {
-                    file.sync_all()
-                        .map_err(|e| err("Cannot sync new note", e))?;
-                    break candidate;
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(e) => return Err(err("Cannot create note", e)),
-            }
-        };
-        let path = normalized_relative(root, &target)?;
-        state.auto_names.insert(key(id, &path), true);
-        if let Err(error) = self.persist(&state) {
-            state.auto_names.remove(&key(id, &path));
-            if let Err(cleanup) = fs::remove_file(&target) {
-                return Err(format!(
-                    "{error}; new empty note remains at {path}: {cleanup}"
-                ));
-            }
-            return Err(error);
-        }
-        Ok(NoteFile {
-            path,
-            content: String::new(),
-            revision: revision(""),
-            auto_rename: true,
-        })
-    }
-    pub fn save_note(
-        &self,
-        id: &str,
-        path: &str,
-        content: &str,
-        expected: &str,
-    ) -> Result<SaveResult, String> {
-        let mut state = self.state.lock().map_err(|_| "Settings lock failed")?;
-        let selected = workspace(&state.settings, id)?.clone();
-        let root = Path::new(&selected.path);
-        let source = resolve(root, path, false)?;
-        let current = note_content(&source)?;
-        if revision(&current) != expected {
-            return Err("Note changed externally. Reload or copy your edits before saving.".into());
-        }
-        self.write_note_file(&source, content.as_bytes())?;
-        let auto = state
-            .auto_names
-            .get(&key(id, path))
-            .copied()
-            .unwrap_or(false);
-        let mut target = source.clone();
-        let mut warnings = Vec::new();
-        if auto {
-            let title = clean_filename(first_h1(content).as_deref().unwrap_or("Untitled"));
-            match unique_file(
-                source.parent().ok_or("Invalid note path")?,
-                &title,
-                Some(&source),
-            ) {
-                Ok(destination) => target = destination,
-                Err(error) => warnings.push(format!(
-                    "Content saved, but automatic rename failed: {error}"
-                )),
-            }
-        }
-        let mut rewritten = Vec::new();
-        if target != source {
-            match self.move_file(&source, &target) {
-                Ok(()) => {
-                    let new_path = normalized_relative(root, &target)?;
-                    state.auto_names.remove(&key(id, path));
-                    state.auto_names.insert(key(id, &new_path), true);
-                    move_appearance(&mut state.settings, id, path, &new_path);
-                    move_session_path(&mut state.settings, id, path, &new_path);
-                    let (links, issues) =
-                        self.rewrite_incoming(&state, &[(source.clone(), target.clone())], id);
-                    rewritten = links;
-                    warnings.extend(issues);
-                    if let Err(error) = self.persist(&state) {
-                        warnings.push(format!(
-                            "Note renamed, but filename settings were not saved: {error}"
-                        ));
-                    }
-                }
-                Err(error) => {
-                    warnings.push(format!(
-                        "Content saved, but automatic rename failed: {error}"
-                    ));
-                    target = source.clone();
-                }
-            }
-        }
-        Ok(SaveResult {
-            note: NoteFile {
-                path: normalized_relative(root, &target)?,
-                content: content.into(),
-                revision: revision(content),
-                auto_rename: auto,
-            },
-            rewritten,
-            warnings,
-        })
-    }
-    pub fn rename_note(
-        &self,
-        id: &str,
-        path: &str,
-        name: &str,
-        expected: &str,
-    ) -> Result<SaveResult, String> {
-        let mut state = self.state.lock().map_err(|_| "Settings lock failed")?;
-        let selected = workspace(&state.settings, id)?.clone();
-        let root = Path::new(&selected.path);
-        let source = resolve(root, path, false)?;
-        let content = note_content(&source)?;
-        if revision(&content) != expected {
-            return Err(
-                "Note changed externally. Reload or copy your edits before renaming.".into(),
-            );
-        }
-        let requested = relative(name, false)?;
-        let parent = requested.parent().unwrap_or(Path::new(""));
-        let file_name = requested
-            .file_name()
-            .ok_or("Invalid note name")?
-            .to_string_lossy();
-        let stem = file_name.strip_suffix(".md").unwrap_or(&file_name);
-        let clean = clean_filename(stem);
-        let destination_dir = resolve(root, parent.to_str().ok_or("Invalid destination")?, true)?;
-        if !destination_dir.is_dir() {
-            return Err("Destination folder does not exist".into());
-        }
-        let target = destination_dir.join(format!("{clean}.md"));
-        if target != source && fs::symlink_metadata(&target).is_ok() {
-            return Err("A note already exists at that path".into());
-        }
-        let (rewritten, mut warnings) = if target != source {
-            self.move_file(&source, &target)?;
-            self.rewrite_incoming(&state, &[(source.clone(), target.clone())], id)
-        } else {
-            (Vec::new(), Vec::new())
-        };
-        let new_path = normalized_relative(root, &target)?;
-        state.auto_names.remove(&key(id, path));
-        if target != source {
-            move_appearance(&mut state.settings, id, path, &new_path);
-            move_session_path(&mut state.settings, id, path, &new_path);
-        }
-        if let Err(error) = self.persist(&state) {
-            warnings.push(format!(
-                "Note renamed, but filename settings were not saved: {error}"
-            ));
-        }
-        Ok(SaveResult {
-            note: NoteFile {
-                path: new_path,
-                content: content.clone(),
-                revision: revision(&content),
-                auto_rename: false,
-            },
-            rewritten,
-            warnings,
-        })
-    }
-    pub fn rename_image(
-        &self,
-        id: &str,
-        path: &str,
-        name: &str,
-    ) -> Result<RenameImageResult, String> {
-        let mut state = self.state.lock().map_err(|_| "Settings lock failed")?;
-        let selected = workspace(&state.settings, id)?.clone();
-        let root = Path::new(&selected.path);
-        let source = resolve(root, path, false)?;
-        if !is_image(&source)
-            || !fs::symlink_metadata(&source)
-                .map_err(|e| err("Cannot inspect image", e))?
-                .is_file()
-        {
-            return Err("Only supported image files can be renamed".into());
-        }
-        let requested = relative(name, false)?;
-        let requested_name = requested
-            .file_name()
-            .ok_or("Invalid image name")?
-            .to_string_lossy();
-        let extension = source
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .ok_or("Invalid image extension")?;
-        let stem = if let Some((stem, requested_extension)) = requested_name.rsplit_once('.') {
-            if !requested_extension.eq_ignore_ascii_case(extension) {
-                return Err("Image extension cannot change".into());
-            }
-            stem
-        } else {
-            &requested_name
-        };
-        let clean = clean_filename(stem);
-        let parent = requested.parent().unwrap_or(Path::new(""));
-        let destination_dir = resolve(root, parent.to_str().ok_or("Invalid destination")?, true)?;
-        if !destination_dir.is_dir() {
-            return Err("Destination folder does not exist".into());
-        }
-        let target = destination_dir.join(format!("{clean}.{extension}"));
-        if target != source && fs::symlink_metadata(&target).is_ok() {
-            return Err("An image already exists at that path".into());
-        }
-        if target == source {
-            return Ok(RenameImageResult {
-                path: path.into(),
-                rewritten: Vec::new(),
-                warnings: Vec::new(),
-            });
-        }
-        self.move_file(&source, &target)?;
-        let new_path = normalized_relative(root, &target)?;
-        move_appearance(&mut state.settings, id, path, &new_path);
-        move_session_path(&mut state.settings, id, path, &new_path);
-        let (rewritten, mut warnings) =
-            self.rewrite_incoming(&state, &[(source.clone(), target.clone())], id);
-        if let Err(error) = self.persist(&state) {
-            warnings.push(format!(
-                "Image renamed, but appearance settings were not saved: {error}"
-            ));
-        }
-        Ok(RenameImageResult {
-            path: new_path,
-            rewritten,
-            warnings,
+            auto_rename,
         })
     }
 
-    pub fn delete_file(
-        &self,
-        id: &str,
-        path: &str,
-        expected: Option<&str>,
-    ) -> Result<DeleteResult, String> {
-        let mut state = self.state.lock().map_err(|_| "Settings lock failed")?;
-        let selected = workspace(&state.settings, id)?;
-        let target = resolve(Path::new(&selected.path), path, false)?;
-        let metadata = fs::symlink_metadata(&target).map_err(|e| err("Cannot inspect entry", e))?;
-        let folder = metadata.is_dir();
-        if folder
-            && state.settings.workspaces.iter().any(|other| {
-                let other_root = Path::new(&other.path);
-                other.id != id
-                    && (target.starts_with(other_root) || other_root.starts_with(&target))
-            })
-        {
-            return Err("This folder overlaps another open workspace. Remove that workspace from the app before deleting the folder.".into());
-        }
-        if !folder && !metadata.is_file() {
-            return Err("Only regular files and folders can be moved to Trash".into());
-        }
-        if !folder && is_note(&target) {
-            let expected = expected.ok_or("Revision is required to delete a note")?;
-            if revision(&note_content(&target)?) != expected {
-                return Err("Note changed externally. Reload before deleting.".into());
-            }
-        } else if !folder && !is_image(&target) {
-            return Err("Only Markdown notes, supported images and folders can be deleted".into());
-        }
-        let path = normalized_relative(Path::new(&selected.path), &target)?;
-        let matches = |candidate: &str| {
-            candidate == path || (folder && candidate.starts_with(&format!("{path}/")))
-        };
-        let deletion = self.trash.delete(&target);
-        self.scan_cache.invalidate(&target);
-        deletion?;
-        let workspace_prefix = format!("{id}\0");
-        state
-            .auto_names
-            .retain(|entry, _| !entry.strip_prefix(&workspace_prefix).is_some_and(matches));
-        if let Some(appearances) = state.settings.appearances.get_mut(id) {
-            appearances.retain(|entry, _| !matches(entry));
-            if appearances.is_empty() {
-                state.settings.appearances.remove(id);
-            }
-        }
-        remove_session_path(&mut state.settings, id, &path, folder);
-        let mut warnings = Vec::new();
-        if let Err(error) = self.persist(&state) {
-            warnings.push(format!(
-                "Entry moved to Trash, but metadata was not saved: {error}"
-            ));
-        }
-        Ok(DeleteResult { warnings })
-    }
-    pub fn create_folder(&self, id: &str, parent: &str, name: &str) -> Result<(), String> {
-        let state = self.state.lock().map_err(|_| "Settings lock failed")?;
-        let selected = workspace(&state.settings, id)?;
-        if name.is_empty()
-            || name == "."
-            || name == ".."
-            || name.contains('/')
-            || name.contains('\\')
-            || name.chars().any(char::is_control)
-        {
-            return Err("Invalid folder name".into());
-        }
-        let base = resolve(Path::new(&selected.path), parent, true)?;
-        if !base.is_dir() {
-            return Err("Parent folder does not exist".into());
-        }
-        fs::create_dir(base.join(name)).map_err(|e| err("Cannot create folder", e))
-    }
-
-    pub fn move_folder(
-        &self,
-        id: &str,
-        path: &str,
-        destination: &str,
-    ) -> Result<MoveFolderResult, String> {
-        let mut state = self.state.lock().map_err(|_| "Settings lock failed")?;
-        let selected = workspace(&state.settings, id)?.clone();
-        let root = Path::new(&selected.path);
-        let source = resolve(root, path, false)?;
-        if !fs::symlink_metadata(&source)
-            .map_err(|e| err("Cannot inspect folder", e))?
-            .is_dir()
-        {
-            return Err("Only folders can be moved".into());
-        }
-        let requested = relative(destination, false)?;
-        let name = requested.file_name().ok_or("Invalid folder name")?;
-        if name.to_string_lossy().starts_with('.')
-            || name.to_string_lossy().contains('\\')
-            || name.to_string_lossy().chars().any(char::is_control)
-            || matches!(name.to_str(), Some("node_modules" | "__pycache__"))
-        {
-            return Err("Folder name is hidden or excluded from the workspace".into());
-        }
-        let parent = requested.parent().unwrap_or(Path::new(""));
-        let directory = resolve(root, parent.to_str().ok_or("Invalid destination")?, true)?;
-        if !directory.is_dir() {
-            return Err("Destination folder does not exist".into());
-        }
-        let target = directory.join(name);
-        if target == source {
-            return Ok(MoveFolderResult {
-                path: path.into(),
-                rewritten: Vec::new(),
-                warnings: Vec::new(),
-            });
-        }
-        if target.starts_with(&source) {
-            return Err("Cannot move a folder into itself".into());
-        }
-        if fs::symlink_metadata(&target).is_ok() {
-            return Err("An entry already exists at that path".into());
-        }
-        let mappings = WalkDir::new(&source)
-            .follow_links(false)
-            .into_iter()
-            .filter_map(Result::ok)
-            .filter(|entry| {
-                entry.file_type().is_file() && (is_note(entry.path()) || is_image(entry.path()))
-            })
-            .map(|entry| {
-                let old = entry.path().to_path_buf();
-                let new = target.join(
-                    old.strip_prefix(&source)
-                        .map_err(|e| err("Cannot map moved file", e))?,
-                );
-                Ok((old, new))
-            })
-            .collect::<Result<Vec<_>, String>>()?;
-        fs::rename(&source, &target).map_err(|e| err("Cannot move folder", e))?;
-        self.scan_cache.remove_root(root);
-        let new_path = normalized_relative(root, &target)?;
-        if let Some(appearances) = state.settings.appearances.get_mut(id) {
-            let old = std::mem::take(appearances);
-            *appearances = old
-                .into_iter()
-                .map(|(key, value)| (remap_tree_path(&key, path, &new_path).unwrap_or(key), value))
-                .collect();
-        }
-        if let Some(session) = state.settings.sessions.get_mut(id) {
-            for tab in &mut session.tabs {
-                if let Some(mapped) = remap_tree_path(tab, path, &new_path) {
-                    *tab = mapped;
-                }
-            }
-            if let Some(value) = &mut session.primary {
-                if let Some(mapped) = remap_tree_path(value, path, &new_path) {
-                    *value = mapped;
-                }
-            }
-            if let Some(value) = &mut session.secondary {
-                if let Some(mapped) = remap_tree_path(value, path, &new_path) {
-                    *value = mapped;
-                }
-            }
-        }
-        let prefix = format!("{id}\0");
-        let names = std::mem::take(&mut state.auto_names);
-        state.auto_names = names
-            .into_iter()
-            .map(|(key, value)| {
-                let mapped = key
-                    .strip_prefix(&prefix)
-                    .and_then(|item| remap_tree_path(item, path, &new_path));
-                (
-                    mapped.map(|item| format!("{prefix}{item}")).unwrap_or(key),
-                    value,
-                )
-            })
-            .collect();
-        let (rewritten, mut warnings) = self.rewrite_incoming(&state, &mappings, id);
-        if let Err(error) = self.persist(&state) {
-            warnings.push(format!(
-                "Folder moved, but workspace settings were not saved: {error}"
-            ));
-        }
-        Ok(MoveFolderResult {
-            path: new_path,
-            rewritten,
-            warnings,
-        })
-    }
     pub fn read_image(&self, id: &str, path: &str) -> Result<ImageData, String> {
-        let state = self.state.lock().map_err(|_| "Settings lock failed")?;
-        let selected = workspace(&state.settings, id)?;
+        let (selected, _) = self.mutations.read_context(id, path)?;
         let full = resolve(Path::new(&selected.path), path, false)?;
+        #[cfg(test)]
+        self.pause_read(&full);
         let mime = match full
             .extension()
             .and_then(|e| e.to_str())
@@ -1022,28 +413,8 @@ impl Service {
             mime: mime.into(),
         })
     }
-    fn rewrite_incoming(
-        &self,
-        state: &Stored,
-        mappings: &[(PathBuf, PathBuf)],
-        target_workspace_id: &str,
-    ) -> (Vec<Rewrite>, Vec<String>) {
-        rewrite_incoming(
-            &state.settings.workspaces,
-            target_workspace_id,
-            mappings,
-            |path, bytes| self.write_note_file(path, bytes),
-        )
-    }
 }
-fn move_without_overwrite(source: &Path, target: &Path) -> Result<(), String> {
-    fs::hard_link(source, target).map_err(|e| err("Cannot rename note without overwriting", e))?;
-    if let Err(e) = fs::remove_file(source) {
-        let _ = fs::remove_file(target);
-        return Err(err("Cannot remove old note after rename", e));
-    }
-    Ok(())
-}
+
 #[derive(serde::Serialize)]
 pub struct ImageData {
     pub data: String,
@@ -1056,6 +427,280 @@ mod tests {
     use crate::scan_cache::ReadPause;
     use std::sync::mpsc;
     use std::time::Duration;
+
+    #[cfg(unix)]
+    #[test]
+    fn traversal_error_preserves_healthy_siblings_and_recovers_after_access_returns() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let config = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let visible = root.path().join("visible");
+        let inaccessible = visible.join("inaccessible");
+        fs::create_dir_all(&inaccessible).unwrap();
+        fs::write(inaccessible.join("child.md"), "# Child").unwrap();
+        fs::write(root.path().join("healthy.md"), "# Healthy").unwrap();
+        let permissions = fs::metadata(&inaccessible).unwrap().permissions();
+        // Privileged processes can bypass Unix permission bits, so first verify
+        // that this environment can actually exercise a read_dir failure.
+        fs::set_permissions(&inaccessible, fs::Permissions::from_mode(0o0)).unwrap();
+        let permission_enforced = fs::read_dir(&inaccessible).is_err();
+        fs::set_permissions(&inaccessible, permissions.clone()).unwrap();
+        if !permission_enforced {
+            eprintln!("Traversal permission regression requires enforced Unix permissions");
+            return;
+        }
+        let service = Arc::new(Service::new(config.path().to_path_buf()).unwrap());
+        let id = service
+            .add_workspace(root.path().to_str().unwrap())
+            .unwrap()
+            .workspace
+            .id;
+        let (entered_sender, entered) = mpsc::channel();
+        let (resume, resumed) = mpsc::channel();
+        *service.read_pause.lock().unwrap() = Some(ReadPause {
+            path: visible,
+            entered: entered_sender,
+            resume: resumed,
+        });
+        let scanner = service.clone();
+        let scan_id = id.clone();
+        let worker = std::thread::spawn(move || scanner.scan_workspace(&scan_id));
+        let reached = entered.recv_timeout(Duration::from_secs(2));
+        // The visible parent is discovered, but WalkDir has not opened this
+        // child directory. Its subsequent enumeration must return WalkDir::Err.
+        fs::set_permissions(&inaccessible, fs::Permissions::from_mode(0o0)).unwrap();
+        let _ = resume.send(());
+        let result = worker.join();
+        fs::set_permissions(&inaccessible, permissions).unwrap();
+        let snapshot = result.unwrap().unwrap();
+        assert!(reached.is_ok(), "scan did not reach the visible folder");
+        assert!(snapshot.incomplete);
+        assert!(snapshot
+            .entries
+            .iter()
+            .any(|entry| entry.path == "healthy.md"));
+        assert!(!snapshot
+            .entries
+            .iter()
+            .any(|entry| entry.path == "visible/inaccessible/child.md"));
+        assert_eq!(snapshot.warnings.len(), 1);
+        assert!(snapshot.warnings[0].contains("Cannot scan part of workspace"));
+        assert!(snapshot.warnings[0].contains("visible/inaccessible"));
+        let recovered = service.scan_workspace(&id).unwrap();
+        assert!(!recovered.incomplete);
+        assert!(recovered.warnings.is_empty());
+        assert!(recovered.entries.iter().any(|entry| {
+            entry.path == "visible/inaccessible/child.md" && entry.title == "Child"
+        }));
+    }
+
+    #[test]
+    fn note_read_failure_returns_partial_snapshot_and_recovers_on_next_scan() {
+        let config = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let vanishing = root.path().join("vanishing.md");
+        fs::write(&vanishing, "# Vanishing").unwrap();
+        fs::write(root.path().join("healthy.md"), "# Healthy").unwrap();
+        let service = Arc::new(Service::new(config.path().to_path_buf()).unwrap());
+        let id = service
+            .add_workspace(root.path().to_str().unwrap())
+            .unwrap()
+            .workspace
+            .id;
+        service.scan_cache.invalidate(&vanishing);
+        let (entered_sender, entered) = mpsc::channel();
+        let (resume, resumed) = mpsc::channel();
+        *service.scan_cache.read_pause.lock().unwrap() = Some(ReadPause {
+            path: vanishing.clone(),
+            entered: entered_sender,
+            resume: resumed,
+        });
+        let scanner = service.clone();
+        let scan_id = id.clone();
+        let worker = std::thread::spawn(move || scanner.scan_workspace(&scan_id));
+        let reached = entered.recv_timeout(Duration::from_secs(2));
+        fs::remove_file(&vanishing).unwrap();
+        let _ = resume.send(());
+        let snapshot = worker.join().unwrap().unwrap();
+        assert!(reached.is_ok(), "scan did not reach the note read");
+        assert!(snapshot.incomplete);
+        assert_eq!(snapshot.entries.len(), 1);
+        assert_eq!(snapshot.entries[0].path, "healthy.md");
+        assert_eq!(snapshot.warnings.len(), 1);
+        assert!(snapshot.warnings[0].contains("Cannot read note metadata (vanishing.md)"));
+        fs::write(vanishing, "# Restored\n#tag").unwrap();
+        let snapshot = service.scan_workspace(&id).unwrap();
+        assert!(!snapshot.incomplete);
+        assert!(snapshot.warnings.is_empty());
+        let restored = snapshot
+            .entries
+            .iter()
+            .find(|entry| entry.path == "vanishing.md")
+            .unwrap();
+        assert_eq!(restored.title, "Restored");
+        assert_eq!(restored.tags, vec!["tag"]);
+    }
+
+    #[test]
+    fn metadata_failure_returns_healthy_entries_and_an_incomplete_snapshot() {
+        let config = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        fs::write(root.path().join("vanishing.md"), "# Vanishing").unwrap();
+        fs::write(root.path().join("healthy.md"), "# Healthy").unwrap();
+        let service = Arc::new(Service::new(config.path().to_path_buf()).unwrap());
+        let id = service
+            .add_workspace(root.path().to_str().unwrap())
+            .unwrap()
+            .workspace
+            .id;
+        let (entered_sender, entered) = mpsc::channel();
+        let (resume, resumed) = mpsc::channel();
+        *service.read_pause.lock().unwrap() = Some(ReadPause {
+            path: root.path().join("vanishing.md"),
+            entered: entered_sender,
+            resume: resumed,
+        });
+        let scanner = service.clone();
+        let worker = std::thread::spawn(move || scanner.scan_workspace(&id));
+        let reached = entered.recv_timeout(Duration::from_secs(2));
+        fs::remove_file(root.path().join("vanishing.md")).unwrap();
+        let _ = resume.send(());
+        let result = worker.join().unwrap().unwrap();
+        assert!(reached.is_ok());
+        assert!(result.incomplete);
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(result.entries[0].path, "healthy.md");
+        assert_eq!(result.warnings.len(), 1);
+        assert!(result.warnings[0].contains("vanishing.md"));
+    }
+
+    #[test]
+    fn repeated_large_workspace_scans_cache_notes_admitted_after_ten_thousand_entries() {
+        let config = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        for index in 0..10_000 {
+            fs::write(root.path().join(format!("{index}.md")), "# Existing\n#tag").unwrap();
+        }
+        let service = Service::new(config.path().to_path_buf()).unwrap();
+        let id = service
+            .add_workspace(root.path().to_str().unwrap())
+            .unwrap()
+            .workspace
+            .id;
+        let late = root.path().join("late.md");
+        fs::write(&late, "# Late\n#tag").unwrap();
+        service.scan_workspace(&id).unwrap();
+        let (entered, receiver) = mpsc::channel();
+        let (resume, resumed) = mpsc::channel();
+        resume.send(()).unwrap();
+        *service.scan_cache.read_pause.lock().unwrap() = Some(ReadPause {
+            path: late,
+            entered,
+            resume: resumed,
+        });
+        for _ in 0..2 {
+            let snapshot = service.scan_workspace(&id).unwrap();
+            assert_eq!(snapshot.entries.len(), 10_001);
+            assert_eq!(
+                snapshot
+                    .entries
+                    .iter()
+                    .find(|entry| entry.path == "late.md")
+                    .unwrap()
+                    .title,
+                "Late"
+            );
+        }
+        assert!(
+            receiver.try_recv().is_err(),
+            "warm scans reparsed the late entry"
+        );
+        assert!(service.scan_cache.read_pause.lock().unwrap().is_some());
+    }
+
+    #[test]
+    fn slow_note_and_image_reads_do_not_block_ordered_mutations() {
+        for path in ["a.md", "a.png"] {
+            let config = tempfile::tempdir().unwrap();
+            let root = tempfile::tempdir().unwrap();
+            fs::write(root.path().join("a.md"), "# Original").unwrap();
+            fs::write(root.path().join("a.png"), "image bytes").unwrap();
+            let service = Arc::new(Service::new(config.path().to_path_buf()).unwrap());
+            let id = service
+                .add_workspace(root.path().to_str().unwrap())
+                .unwrap()
+                .workspace
+                .id;
+            let revision = service.read_note(&id, "a.md").unwrap().revision;
+            let (entered_sender, entered) = mpsc::channel();
+            let (resume, resume_receiver) = mpsc::channel();
+            *service.read_pause.lock().unwrap() = Some(ReadPause {
+                path: root.path().join(path),
+                entered: entered_sender,
+                resume: resume_receiver,
+            });
+            let reader_service = service.clone();
+            let reader_id = id.clone();
+            let reader = std::thread::spawn(move || {
+                if path.ends_with("md") {
+                    reader_service.read_note(&reader_id, path).map(|_| ())
+                } else {
+                    reader_service.read_image(&reader_id, path).map(|_| ())
+                }
+            });
+            let read_entered = entered.recv_timeout(Duration::from_secs(1));
+            let (saved_sender, saved) = mpsc::channel();
+            let writer = std::thread::spawn(move || {
+                let _ = saved_sender.send(service.save_note(&id, "a.md", "# Saved", &revision));
+            });
+            let result = saved.recv_timeout(Duration::from_secs(1));
+            let reader_stalled = !reader.is_finished();
+            let _ = resume.send(());
+            let read_result = reader.join();
+            writer.join().unwrap();
+            assert!(read_entered.is_ok());
+            assert!(reader_stalled);
+            assert!(result.unwrap().is_ok());
+            assert!(read_result.unwrap().is_ok());
+        }
+    }
+
+    #[test]
+    fn move_primitives_never_replace_existing_files_folders_or_dangling_symlinks() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source.md");
+        let target = root.path().join("target.md");
+        fs::write(&source, "source").unwrap();
+        fs::write(&target, "target").unwrap();
+        assert!(move_without_overwrite(&source, &target).is_err());
+        assert!(move_file_by_link(&source, &target).is_err());
+        assert_eq!(fs::read_to_string(&source).unwrap(), "source");
+        assert_eq!(fs::read_to_string(&target).unwrap(), "target");
+        let folder = root.path().join("folder");
+        let existing_folder = root.path().join("existing");
+        fs::create_dir(&folder).unwrap();
+        fs::create_dir(&existing_folder).unwrap();
+        assert!(move_without_overwrite(&folder, &existing_folder).is_err());
+        assert!(move_file_by_link(&folder, &root.path().join("new")).is_err());
+        assert!(folder.is_dir());
+        assert!(existing_folder.is_dir());
+        #[cfg(unix)]
+        {
+            let dangling = root.path().join("dangling");
+            std::os::unix::fs::symlink("missing", &dangling).unwrap();
+            assert!(move_without_overwrite(&source, &dangling).is_err());
+            assert!(move_file_by_link(&source, &dangling).is_err());
+            assert!(fs::symlink_metadata(dangling)
+                .unwrap()
+                .file_type()
+                .is_symlink());
+        }
+        let new_target = root.path().join("linked.md");
+        move_file_by_link(&source, &new_target).unwrap();
+        assert!(!source.exists());
+        assert_eq!(fs::read_to_string(new_target).unwrap(), "source");
+    }
 
     #[test]
     fn slow_scan_does_not_block_note_saves_or_other_workspace_scans() {
@@ -1126,3 +771,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "workspace_mutations_tests.rs"]
+mod mutation_tests;

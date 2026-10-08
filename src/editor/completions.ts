@@ -92,7 +92,7 @@ export function noteCompletions(
         validFor: /^[\w-]*$/,
       };
     }
-    const match = /\[\[([^\[\]\n|]*)$/.exec(before);
+    const match = /\[\[([^\]\n|[]*)$/.exec(before);
     const notes = match ? getNotes() : null;
     if (!match || !notes) return null;
     const target = match[1] ?? "";
@@ -123,7 +123,7 @@ export function noteCompletions(
           options: headings.map(({ text }) =>
             wikiCompletion(text, text, "Heading"),
           ),
-          validFor: /^[^\[\]\n|#]*$/,
+          validFor: /^[^\]\n|#[]*$/,
         };
       } catch {
         return null;
@@ -133,16 +133,20 @@ export function noteCompletions(
       from,
       options: notes.notes
         .filter((note) => note.kind === "note")
-        .map((note) =>
-          wikiCompletion(
-            note.title,
-            note.workspaceId === notes.workspaceId
-              ? `/${linkPath(note.path)}`
-              : `${note.workspaceId}:/${linkPath(note.path)}`,
-            `${note.workspaceName} · ${note.path}`,
-          ),
+        .flatMap((note) =>
+          [note.title, ...(note.aliases ?? [])]
+            .filter((label, index, labels) => labels.indexOf(label) === index)
+            .map((label) =>
+              wikiCompletion(
+                label,
+                note.workspaceId === notes.workspaceId
+                  ? `/${linkPath(note.path)}`
+                  : `${note.workspaceId}:/${linkPath(note.path)}`,
+                `${note.workspaceName} · ${note.path}`,
+              ),
+            ),
         ),
-      validFor: /^[^\[\]\n|#]*$/,
+      validFor: /^[^\]\n|#[]*$/,
     };
   };
 }

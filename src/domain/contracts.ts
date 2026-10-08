@@ -25,11 +25,14 @@ export const entrySchema = z.object({
   kind: z.enum(["note", "image", "folder"]),
   title: z.string(),
   tags: z.array(z.string()),
+  aliases: z.array(z.string()).optional(),
   modified: z.number(),
 });
 export const snapshotSchema = z.object({
   workspace: workspaceSchema,
   entries: z.array(entrySchema),
+  warnings: z.array(z.string()).optional(),
+  incomplete: z.boolean().optional(),
 });
 export const noteSchema = z.object({
   path: z.string(),

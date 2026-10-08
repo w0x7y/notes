@@ -438,7 +438,8 @@ export class DrawingController {
     }
     if (mod && key === "z") {
       event.preventDefault();
-      event.shiftKey ? this.redo() : this.undo();
+      if (event.shiftKey) this.redo();
+      else this.undo();
       return;
     }
     if (mod && key === "y") {

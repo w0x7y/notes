@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CompletionContext } from "@codemirror/autocomplete";
-import { EditorState } from "@codemirror/state";
+import { EditorState, type TransactionSpec } from "@codemirror/state";
+import type { EditorView } from "@codemirror/view";
 import { markdown } from "@codemirror/lang-markdown";
 import { noteCompletions, type CompletionNotes } from "./completions";
 import type { SearchEntry } from "../domain/contracts";
@@ -35,6 +36,43 @@ const config: CompletionNotes = {
   notes,
   readHeadings: async () => [{ text: "מבוא" }, { text: "Review" }],
 };
+
+it("suggests aliases while inserting explicit paths and resolves alias heading completion", async () => {
+  const aliased = { ...notes[0]!, aliases: ["כינוי", "Shared alias"] };
+  const custom = {
+    ...config,
+    notes: [aliased, { ...notes[1]!, aliases: ["Shared alias"] }],
+  };
+  const result = await complete("[[כ", custom);
+  expect(result?.options.some((option) => option.label === "כינוי")).toBe(true);
+  const alias = result?.options.find((option) => option.label === "כינוי");
+  let state = EditorState.create({ doc: "[[כ" });
+  const view = {
+    get state() {
+      return state;
+    },
+    dispatch(spec: TransactionSpec) {
+      state = state.update(spec).state;
+    },
+  } as EditorView;
+  if (typeof alias?.apply !== "function")
+    throw new Error("Expected a link insertion");
+  alias.apply(view, alias, result!.from, state.doc.length);
+  expect(state.doc.toString()).toBe("[[/Lessons/Math.md]]");
+  expect(
+    result?.options.filter((option) => option.label === "Shared alias"),
+  ).toHaveLength(2);
+  const calls: string[] = [];
+  const heading = await complete("[[כינוי#", {
+    ...custom,
+    readHeadings: async (id, path) => {
+      calls.push(`${id}:${path}`);
+      return [{ text: "Heading" }];
+    },
+  });
+  expect(calls).toEqual(["school:Lessons/Math.md"]);
+  expect(heading?.options[0]?.label).toBe("Heading");
+});
 
 describe("Markdown completions", () => {
   it("offers titles from all workspaces with paths to distinguish duplicates", async () => {

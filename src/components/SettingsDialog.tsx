@@ -15,6 +15,15 @@ import "../knowledge/graph.css";
 import { ThemePicker } from "../theme/ThemePicker";
 import { FontPicker } from "./FontPicker";
 import { files } from "../platform";
+import { workspaceShortcuts } from "../domain/workspace-commands";
+
+let installedFonts: Promise<string[]> | undefined;
+function listInstalledFonts() {
+  return (installedFonts ??= files.listFonts().catch((error: unknown) => {
+    installedFonts = undefined;
+    throw error;
+  }));
+}
 
 type Section =
   | "Appearance"
@@ -119,8 +128,7 @@ export function SettingsDialog({
     let cancelled = false;
     setFontsLoading(true);
     setFontError(null);
-    void files
-      .listFonts()
+    void listInstalledFonts()
       .then((families) => {
         if (!cancelled) setFonts(families);
       })
@@ -545,15 +553,30 @@ export function SettingsDialog({
                 <h3>Keyboard shortcuts</h3>
                 <dl className="shortcut-list">
                   {[
-                    ["Ctrl ,", "Settings"],
-                    ["Ctrl P", "Search titles and tags"],
-                    ["Ctrl N", "New note"],
-                    ["Ctrl S", "Save now"],
-                    ["Ctrl W / middle-click", "Close tab"],
-                    ["Ctrl Tab / Ctrl Shift Tab", "Next / previous tab"],
-                    ["Ctrl \\", "Toggle split pane"],
+                    ...workspaceShortcuts.map(({ shortcut, label }) => [
+                      shortcut!,
+                      label,
+                    ]),
+                    [
+                      "Middle-click / Delete on a tab",
+                      "Close tab after saving",
+                    ],
+                    [
+                      "Arrow keys / Home / End",
+                      "Navigate tabs when the tab bar is focused",
+                    ],
+                    ["Ctrl F", "Find and replace in the editor"],
+                    ["F3 / Shift F3", "Next / previous match"],
+                    ["Ctrl D", "Select the next occurrence"],
                     ["Ctrl B / Ctrl I", "Bold / italic"],
-                    ["Ctrl Z / Ctrl Shift Z", "Undo / redo"],
+                    ["Ctrl Z / Ctrl Shift Z / Ctrl Y", "Undo / redo"],
+                    [
+                      "Enter / Space on a preview block",
+                      "Edit this Markdown block",
+                    ],
+                    ["Escape, then Tab", "Leave the editor with the keyboard"],
+                    ["/ at the start of a line", "Markdown slash commands"],
+                    ["[[", "Complete a note or heading link"],
                   ].map(([keys, label]) => (
                     <div key={keys}>
                       <dt>{label}</dt>
@@ -563,6 +586,12 @@ export function SettingsDialog({
                     </div>
                   ))}
                 </dl>
+                <p className="settings-note">
+                  App shortcuts use physical key positions, so they keep working
+                  with Hebrew and English layouts. Editor shortcuts use Ctrl on
+                  Linux. Search in a preview block applies to that block; switch
+                  to Edit to search the whole note.
+                </p>
               </>
             )}
           </div>

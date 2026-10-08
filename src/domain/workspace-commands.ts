@@ -201,10 +201,20 @@ const definitions: readonly ScopedDefinition[] = [
 type Shortcut = Pick<
   KeyboardEvent,
   "key" | "ctrlKey" | "metaKey" | "shiftKey" | "altKey"
->;
+> &
+  Partial<Pick<KeyboardEvent, "code" | "isComposing">>;
 export function commandForShortcut(event: Shortcut): WorkspaceCommandId | null {
-  if ((!event.ctrlKey && !event.metaKey) || event.altKey) return null;
-  const key = event.key.toLowerCase();
+  if ((!event.ctrlKey && !event.metaKey) || event.altKey || event.isComposing)
+    return null;
+  const key = event.code
+    ? /^Key[A-Z]$/.test(event.code)
+      ? event.code.slice(3).toLowerCase()
+      : event.code === "Comma"
+        ? ","
+        : event.code === "Backslash"
+          ? "\\"
+          : event.code.toLowerCase()
+    : event.key.toLowerCase();
   return (
     definitions.find(
       (definition) =>
@@ -238,6 +248,11 @@ function present(definition: ScopedDefinition): WorkspaceCommand {
   };
 }
 
+// Use the command registry for shortcut help so new bindings stay discoverable.
+export const workspaceShortcuts = definitions
+  .filter((definition) => definition.shortcut)
+  .map(present);
+
 export function createWorkspaceCommands(dependencies: {
   context: (purpose: "availability" | "execution") => CommandContext;
   global: GlobalCommandHandlers;
@@ -247,8 +262,10 @@ export function createWorkspaceCommands(dependencies: {
   reportError: (error: unknown) => void;
 }) {
   return {
-    available(surface: "palette" | "tools"): WorkspaceCommand[] {
-      const context = dependencies.context("availability");
+    available(
+      surface: "palette" | "tools",
+      context = dependencies.context("availability"),
+    ): WorkspaceCommand[] {
       const available = definitions.filter(
         (definition) =>
           (surface === "palette" ? definition.palette : definition.tool) &&

@@ -6,11 +6,14 @@ import {
   withCaptureDocuments,
   type WorkspaceDocuments,
 } from "../domain/app-store";
-import { files } from "../platform";
 import { expandTemplate, localDate, starterTemplates } from "./template-format";
 export { localDate, starterTemplates } from "./template-format";
 const preparing = new Map<string, Promise<void>>();
-async function ensureFolder(id: string, folder: string): Promise<void> {
+async function ensureFolder(
+  documents: WorkspaceDocuments,
+  folder: string,
+): Promise<void> {
+  const id = documents.id;
   if (
     useApp
       .getState()
@@ -18,7 +21,7 @@ async function ensureFolder(id: string, folder: string): Promise<void> {
   )
     return;
   try {
-    await files.createFolder(id, "", folder);
+    await documents.createFolder("", folder);
   } catch (error) {
     await refreshWorkspace(id);
     if (
@@ -28,7 +31,6 @@ async function ensureFolder(id: string, folder: string): Promise<void> {
     )
       throw error;
   }
-  await refreshWorkspace(id);
 }
 export function ensureTemplates(id: string): Promise<void> {
   return withWorkspaceDocuments(id, seedTemplates);
@@ -39,7 +41,7 @@ function seedTemplates(documents: WorkspaceDocuments): Promise<void> {
   const pending = preparing.get(id);
   if (pending) return pending;
   const request = (async () => {
-    await ensureFolder(id, "Templates");
+    await ensureFolder(documents, "Templates");
     for (const [name, content] of Object.entries(starterTemplates)) {
       const path = `Templates/${name}.md`;
       if (!useApp.getState().entries[id]?.some((e) => e.path === path))
@@ -77,8 +79,7 @@ let capture: Promise<void> | null = null;
 export function quickCapture(): Promise<void> {
   if (capture) return capture;
   const request = withCaptureDocuments(async (documents) => {
-    const id = documents.id;
-    await ensureFolder(id, "Inbox");
+    await ensureFolder(documents, "Inbox");
     await documents.create("Inbox");
   });
   capture = request.finally(() => {
@@ -93,7 +94,7 @@ export function openDaily(): Promise<void> {
     const date = localDate(),
       path = `Daily/${date}.md`;
     const id = documents.id;
-    await ensureFolder(id, "Daily");
+    await ensureFolder(documents, "Daily");
     if (useApp.getState().entries[id]?.some((e) => e.path === path)) {
       openFile(id, path);
       return;

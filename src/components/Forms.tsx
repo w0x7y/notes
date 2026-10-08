@@ -132,7 +132,11 @@ export function WorkspaceDialog({
           }}
         />
         <p className="muted">{workspace.path}</p>
-        {error && <p className="form-error">{error}</p>}
+        {error && (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        )}
         <div className="form-actions">
           <button
             type="button"

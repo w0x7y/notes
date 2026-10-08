@@ -369,15 +369,15 @@ it("reports read failures and retries when the failed consumer is reopened", asy
 it("uses an available live buffer when an earlier disk read fails", async () => {
   const { ContentAnalysis } = await import("./content-analysis");
   const { NoteDocument } = await import("../domain/document");
-  let live: InstanceType<typeof NoteDocument> | undefined;
+  const live: { document?: InstanceType<typeof NoteDocument> } = {};
   const disk = deferred<NoteFile>();
   const analysis = new ContentAnalysis({
-    getLiveDocument: () => live,
+    getLiveDocument: () => live.document,
     readNote: () => disk.promise,
   });
   analysis.synchronize([entry("a.md")]);
   const pending = analysis.getNote("algebra", "a.md");
-  live = new NoteDocument(
+  live.document = new NoteDocument(
     "algebra",
     noteFile("a.md", "# Live text survives"),
     async (note) => ({ ...note, rewritten: [], warnings: [] }),
@@ -385,7 +385,7 @@ it("uses an available live buffer when an earlier disk read fails", async () => 
   );
   disk.reject(new Error("Old disk read failed"));
   expect((await pending).headings[0]?.text).toBe("Live text survives");
-  live.dispose();
+  live.document.dispose();
 });
 
 // Cancellation cannot free a semaphore slot until uncancellable native I/O settles, or reopening starts more than four real reads.

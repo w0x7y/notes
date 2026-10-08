@@ -9,6 +9,7 @@ import type {
 import {
   basename,
   extractTags,
+  extractAliases,
   noteTitle,
   parentFolder,
   splitNote,
@@ -140,6 +141,7 @@ export function createDemoFiles(): FileService {
           kind: "note" as const,
           title: noteTitle(note.path, note.content),
           tags: extractTags(note.content),
+          aliases: extractAliases(note.content),
           modified: Number(note.revision),
         })),
     ],
@@ -295,6 +297,7 @@ export function createDemoFiles(): FileService {
       const title =
         splitNote(note.content)
           .title.trim()
+          // eslint-disable-next-line no-control-regex -- Filename sanitization replaces control characters.
           .replace(/[/\\\x00-\x1f]/g, "-") || "Untitled";
       const path = previous.autoRename
         ? unique(id, parentFolder(note.path), title, note.path)

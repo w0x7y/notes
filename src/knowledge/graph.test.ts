@@ -42,6 +42,28 @@ const entries = {
   project: [entry("P.md")],
 };
 
+it("connects alias links and leaves conflicting aliases unresolved", () => {
+  const entries = {
+    school: [
+      entry("Source.md"),
+      { ...entry("Target.md"), aliases: ["כינוי"] },
+      { ...entry("Other.md"), aliases: ["Shared"] },
+      { ...entry("Extra.md"), aliases: ["Shared"] },
+    ],
+  };
+  const layout = buildGraphLayout({
+    workspaces: [workspace("school")],
+    entries,
+  });
+  const graph = connectGraph(layout, [
+    parsed("school", "Source.md", "[[כינוי]] [[Shared]]"),
+  ]);
+  expect(graph.links.map((link) => link.target.note.path)).toEqual([
+    "Target.md",
+  ]);
+  expect(graph.unresolved).toBe(1);
+});
+
 it("groups notes by workspace and nested folders, independent of entry order", () => {
   const layout = buildGraphLayout({ workspaces, entries });
   expect(layout.nodes).toHaveLength(4);

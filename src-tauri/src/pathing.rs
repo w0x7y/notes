@@ -2,6 +2,8 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
 
+pub(crate) const MAX_NOTE_BYTES: u64 = 20 * 1024 * 1024;
+
 pub(crate) fn open_regular(path: &Path) -> io::Result<File> {
     let mut options = OpenOptions::new();
     options.read(true);
@@ -22,10 +24,21 @@ pub(crate) fn open_regular(path: &Path) -> io::Result<File> {
     Ok(file)
 }
 
-pub(crate) fn read_regular_text(path: &Path) -> io::Result<String> {
-    let mut text = String::new();
-    open_regular(path)?.read_to_string(&mut text)?;
-    Ok(text)
+pub(crate) fn read_note_text(path: &Path) -> io::Result<String> {
+    read_bounded_text(open_regular(path)?, MAX_NOTE_BYTES)
+}
+
+fn read_bounded_text(file: File, limit: u64) -> io::Result<String> {
+    let too_large = || io::Error::new(io::ErrorKind::InvalidData, "Note exceeds 20 MiB limit");
+    if file.metadata()?.len() > limit {
+        return Err(too_large());
+    }
+    let mut bytes = Vec::new();
+    file.take(limit + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > limit {
+        return Err(too_large());
+    }
+    String::from_utf8(bytes).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
 }
 
 pub fn relative(path: &str, allow_empty: bool) -> Result<PathBuf, String> {
@@ -90,17 +103,26 @@ pub fn clean_filename(name: &str) -> String {
     if cleaned.is_empty() {
         "Untitled".into()
     } else {
-        cleaned.chars().take(180).collect()
+        truncate_utf8(cleaned, 180).into()
     }
+}
+
+fn truncate_utf8(value: &str, max_bytes: usize) -> &str {
+    let mut end = value.len().min(max_bytes);
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    &value[..end]
 }
 
 pub fn unique_file(parent: &Path, stem: &str, source: Option<&Path>) -> Result<PathBuf, String> {
     for index in 1.. {
-        let name = if index == 1 {
-            format!("{stem}.md")
+        let suffix = if index == 1 {
+            ".md".to_string()
         } else {
-            format!("{stem} {index}.md")
+            format!(" {index}.md")
         };
+        let name = format!("{}{}", truncate_utf8(stem, 255 - suffix.len()), suffix);
         let candidate = parent.join(name);
         if source == Some(candidate.as_path()) {
             return Ok(candidate);
@@ -112,4 +134,44 @@ pub fn unique_file(parent: &Path, stem: &str, source: Option<&Path>) -> Result<P
         }
     }
     unreachable!()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bounded_text_accepts_the_limit_and_rejects_oversize_and_invalid_utf8() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("note.md");
+        std::fs::write(&path, "שלום").unwrap();
+        assert_eq!(
+            read_bounded_text(open_regular(&path).unwrap(), 8).unwrap(),
+            "שלום"
+        );
+        assert!(read_bounded_text(open_regular(&path).unwrap(), 7)
+            .unwrap_err()
+            .to_string()
+            .contains("20 MiB"));
+        std::fs::write(&path, [0xff]).unwrap();
+        assert_eq!(
+            read_bounded_text(open_regular(&path).unwrap(), 8)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+    }
+
+    #[test]
+    fn unique_filenames_budget_bytes_for_extensions_and_collision_suffixes() {
+        let root = tempfile::tempdir().unwrap();
+        let stem = "ש".repeat(180);
+        let first = unique_file(root.path(), &stem, None).unwrap();
+        assert!(first.file_name().unwrap().len() <= 255);
+        std::fs::write(&first, "").unwrap();
+        let second = unique_file(root.path(), &stem, None).unwrap();
+        assert!(second.file_name().unwrap().len() <= 255);
+        assert!(second.to_str().unwrap().ends_with(" 2.md"));
+        std::fs::write(&second, "").unwrap();
+    }
 }

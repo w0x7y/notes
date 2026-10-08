@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { MenuButton } from "../components/PopupMenu";
 import { openFile, useApp } from "../domain/app-store";
-import { useLibrary, toggleFavorite } from "./library";
+import { useLibrary, toggleFavorite } from "../domain/library";
 import type {
   WorkspaceCommand,
   WorkspaceCommandId,

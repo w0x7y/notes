@@ -7,6 +7,12 @@ Notes are ordinary Markdown files inside registered workspace folders.
 **Workspace**:
 A registered folder containing notes, images and optional subfolders. Removing a workspace removes its registration, not its files.
 
+**Workspace refresh**:
+Reconciliation of a registered workspace’s file index and open Documents with current disk contents. Incomplete reads retain known files and unsaved text; removed or superseded workspace states cannot replace the current state.
+
+**Workspace mutation**:
+A change to workspace files, their paths or their registration. Accepted file changes finish before workspace removal, preserve revision conflicts and carry committed paths, incoming links and metadata together. Follow-up failures remain visible without discarding committed work.
+
 **Document**:
 An open note with its current text, saved revision and editing position. Its unsaved text remains available when a save fails.
 

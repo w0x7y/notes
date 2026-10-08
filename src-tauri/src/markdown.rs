@@ -1,12 +1,18 @@
 use percent_encoding::{percent_decode_str, utf8_percent_encode, AsciiSet, CONTROLS};
 use pulldown_cmark::{Event, LinkType, Parser, Tag};
 use regex::{Captures, Regex};
+use serde::de::{self, DeserializeSeed, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use std::collections::HashSet;
+use std::fmt;
 use std::path::{Component, Path, PathBuf};
 use std::sync::LazyLock;
+use unicode_normalization::UnicodeNormalization;
 
-static TAG: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?:^|[^\p{L}\p{N}_])#([\p{L}\p{N}_/-]+)").unwrap());
+static TAG: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?:^|[^\p{L}\p{N}_])#([\p{L}\p{N}_][\p{L}\p{N}\p{M}_/-]*)").unwrap()
+});
+static METADATA_TAG: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[\p{L}\p{N}_][\p{L}\p{N}\p{M}_/-]*$").unwrap());
 static WIKI: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(!?)\[\[([^\]|#]+)(#[^\]|]*)?(\|[^\]]*)?\]\]").unwrap());
 static LINK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\]\(([^)\s]+)(\s+[^)]*)?\)").unwrap());
@@ -116,8 +122,263 @@ fn body_without_frontmatter(content: &str) -> &str {
     content
 }
 
+const MAX_FRONTMATTER_BYTES: usize = 64 * 1024;
+const MAX_METADATA_ITEMS: usize = 256;
+const MAX_METADATA_BYTES: usize = 64 * 1024;
+const METADATA_LIMIT: &str = "Frontmatter metadata exceeds";
+
+#[derive(Default)]
+struct Frontmatter {
+    tags: Vec<String>,
+    aliases: Vec<String>,
+}
+
+#[derive(Default)]
+struct MetadataBudget {
+    items: usize,
+    bytes: usize,
+}
+
+impl MetadataBudget {
+    fn item<E: de::Error>(&mut self) -> Result<(), E> {
+        self.items += 1;
+        if self.items > MAX_METADATA_ITEMS {
+            return Err(E::custom(format!("{METADATA_LIMIT} 256 values")));
+        }
+        Ok(())
+    }
+
+    fn string<E: de::Error>(&mut self, value: &str) -> Result<String, E> {
+        if value.len() > MAX_METADATA_BYTES - self.bytes {
+            return Err(E::custom(format!("{METADATA_LIMIT} 64 KiB of strings")));
+        }
+        self.bytes += value.len();
+        Ok(value.trim().nfc().collect())
+    }
+}
+
+struct MetadataString<'a>(&'a mut MetadataBudget);
+
+impl<'de> DeserializeSeed<'de> for MetadataString<'_> {
+    type Value = Option<String>;
+
+    fn deserialize<D: de::Deserializer<'de>>(
+        self,
+        deserializer: D,
+    ) -> Result<Self::Value, D::Error> {
+        self.0.item()?;
+        deserializer.deserialize_any(self)
+    }
+}
+
+impl<'de> Visitor<'de> for MetadataString<'_> {
+    type Value = Option<String>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a metadata string")
+    }
+
+    fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+        self.0.string(value).map(Some)
+    }
+
+    fn visit_bool<E: de::Error>(self, _: bool) -> Result<Self::Value, E> {
+        Ok(None)
+    }
+
+    fn visit_i64<E: de::Error>(self, _: i64) -> Result<Self::Value, E> {
+        Ok(None)
+    }
+
+    fn visit_u64<E: de::Error>(self, _: u64) -> Result<Self::Value, E> {
+        Ok(None)
+    }
+
+    fn visit_f64<E: de::Error>(self, _: f64) -> Result<Self::Value, E> {
+        Ok(None)
+    }
+
+    fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+        Ok(None)
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut sequence: A) -> Result<Self::Value, A::Error> {
+        while sequence.next_element::<IgnoredAny>()?.is_some() {}
+        Ok(None)
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut mapping: A) -> Result<Self::Value, A::Error> {
+        while mapping.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
+        Ok(None)
+    }
+}
+
+struct MetadataStrings<'a>(&'a mut MetadataBudget);
+
+impl<'de> DeserializeSeed<'de> for MetadataStrings<'_> {
+    type Value = Vec<String>;
+
+    fn deserialize<D: de::Deserializer<'de>>(
+        self,
+        deserializer: D,
+    ) -> Result<Self::Value, D::Error> {
+        deserializer.deserialize_any(self)
+    }
+}
+
+impl<'de> Visitor<'de> for MetadataStrings<'_> {
+    type Value = Vec<String>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("metadata strings or a list")
+    }
+
+    fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+        self.0.item()?;
+        Ok(vec![self.0.string(value)?])
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut sequence: A) -> Result<Self::Value, A::Error> {
+        let mut strings = Vec::new();
+        while let Some(value) = sequence.next_element_seed(MetadataString(self.0))? {
+            if let Some(value) = value {
+                strings.push(value);
+            }
+        }
+        Ok(strings)
+    }
+
+    fn visit_bool<E: de::Error>(self, _: bool) -> Result<Self::Value, E> {
+        Ok(Vec::new())
+    }
+
+    fn visit_i64<E: de::Error>(self, _: i64) -> Result<Self::Value, E> {
+        Ok(Vec::new())
+    }
+
+    fn visit_u64<E: de::Error>(self, _: u64) -> Result<Self::Value, E> {
+        Ok(Vec::new())
+    }
+
+    fn visit_f64<E: de::Error>(self, _: f64) -> Result<Self::Value, E> {
+        Ok(Vec::new())
+    }
+
+    fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+        Ok(Vec::new())
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut mapping: A) -> Result<Self::Value, A::Error> {
+        while mapping.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
+        Ok(Vec::new())
+    }
+}
+
+impl<'de> Visitor<'de> for Frontmatter {
+    type Value = Self;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("frontmatter properties")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(mut self, mut mapping: A) -> Result<Self, A::Error> {
+        let mut budget = MetadataBudget::default();
+        while let Some(key) = mapping.next_key::<MetadataKey>()? {
+            match key {
+                MetadataKey::Tags => {
+                    self.tags = mapping.next_value_seed(MetadataStrings(&mut budget))?
+                }
+                MetadataKey::Aliases => {
+                    self.aliases = mapping.next_value_seed(MetadataStrings(&mut budget))?
+                }
+                _ => {
+                    mapping.next_value::<IgnoredAny>()?;
+                }
+            }
+        }
+        Ok(self)
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(field_identifier, rename_all = "lowercase")]
+enum MetadataKey {
+    Tags,
+    Aliases,
+    #[serde(other)]
+    Other,
+}
+
+fn frontmatter(content: &str) -> Result<Frontmatter, String> {
+    let body = body_without_frontmatter(content);
+    if body.len() == content.len() {
+        return Ok(Frontmatter::default());
+    }
+    let metadata = &content[..content.len() - body.len()];
+    let Some((_, yaml)) = metadata.split_once('\n') else {
+        return Ok(Frontmatter::default());
+    };
+    let yaml = yaml
+        .trim_end_matches(['\r', '\n'])
+        .strip_suffix("---")
+        .unwrap_or(yaml);
+    if yaml.len() > MAX_FRONTMATTER_BYTES {
+        return Err(format!("{METADATA_LIMIT} 64 KiB of YAML input"));
+    }
+    // Ignore unrelated YAML values without building a Value tree. Relevant
+    // scalar aliases share a budget checked before owned strings are allocated.
+    match de::Deserializer::deserialize_map(
+        serde_yaml_ng::Deserializer::from_str(yaml),
+        Frontmatter::default(),
+    ) {
+        Ok(mut metadata) => {
+            let mut seen = HashSet::new();
+            metadata
+                .aliases
+                .retain(|value| !value.is_empty() && seen.insert(value.clone()));
+            Ok(metadata)
+        }
+        Err(error) if error.to_string().contains(METADATA_LIMIT) => Err(error.to_string()),
+        Err(_) => Ok(Frontmatter::default()),
+    }
+}
+
+pub fn aliases(content: &str) -> Vec<String> {
+    frontmatter(content).unwrap_or_default().aliases
+}
+
 pub fn tags(content: &str) -> Vec<String> {
-    let mut tags = Vec::new();
+    merge_tags(content, frontmatter(content).unwrap_or_default().tags)
+}
+
+pub(crate) type NoteMetadata = (Option<String>, Vec<String>, Vec<String>, Option<String>);
+
+pub(crate) fn scan_metadata(content: &str) -> NoteMetadata {
+    let (metadata, warning) = match frontmatter(content) {
+        Ok(metadata) => (metadata, None),
+        Err(error) => (
+            Frontmatter::default(),
+            Some(format!("Frontmatter metadata ignored: {error}")),
+        ),
+    };
+    (
+        first_h1(content),
+        merge_tags(content, metadata.tags),
+        metadata.aliases,
+        warning,
+    )
+}
+
+fn merge_tags(content: &str, metadata_tags: Vec<String>) -> Vec<String> {
+    let mut tags = metadata_tags
+        .into_iter()
+        .filter_map(|tag| {
+            let tag = tag.strip_prefix('#').unwrap_or(&tag);
+            METADATA_TAG.is_match(tag).then(|| tag.to_string())
+        })
+        .collect::<Vec<_>>();
+    let mut seen = HashSet::new();
+    tags.retain(|tag| seen.insert(tag.clone()));
     let visible = map_outside_code(body_without_frontmatter(content), str::to_string, |text| {
         text.chars()
             .map(|ch| if ch == '\n' { '\n' } else { ' ' })
@@ -125,7 +386,7 @@ pub fn tags(content: &str) -> Vec<String> {
     });
     for outside in visible.lines() {
         for cap in TAG.captures_iter(outside) {
-            let tag = cap[1].to_string();
+            let tag = cap[1].nfc().collect::<String>();
             if !tags.contains(&tag) {
                 tags.push(tag);
             }

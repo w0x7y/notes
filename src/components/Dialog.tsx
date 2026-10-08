@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
 
 export function Dialog({
@@ -17,6 +17,7 @@ export function Dialog({
   busy?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
   useEffect(() => {
     const dialog = ref.current;
     dialog?.showModal();
@@ -39,6 +40,7 @@ export function Dialog({
   return (
     <dialog
       ref={ref}
+      aria-labelledby={titleId}
       aria-busy={busy}
       className={`dialog ${className}`}
       onCancel={(event) => {
@@ -59,7 +61,7 @@ export function Dialog({
       }}
     >
       <div className="dialog-header">
-        <h2>{title}</h2>
+        <h2 id={titleId}>{title}</h2>
         <button
           className="icon-button"
           aria-label="Close dialog"

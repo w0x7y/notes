@@ -4,7 +4,9 @@ These three crates keep Tauri 2's GTK 3 dependency types compatible while
 addressing the advisories recorded in the historical
 [final-check report](../../docs/final-check-2026-09-30.md).
 The app owns these patches until its upstream stack supports a compatible
-replacement. GTK 3 itself remains an unmaintained upstream binding.
+replacement carrying these fixes. GTK 3 binding development has resumed; its
+[unmaintained advisory](https://rustsec.org/advisories/RUSTSEC-2024-0415.html)
+was withdrawn on 2026-09-08. This does not replace the local backports below.
 
 ## Sources and changes
 
@@ -62,6 +64,6 @@ the original GLib source and passed after applying the pointer fix. It exercises
 strings/arrays. The old proc-macro-error/attribute packages and Syn 1 disappear
 from the resolved lockfile.
 
-When Tauri supports a compatible maintained GTK stack, remove all three patch
+When Tauri supports a compatible stack carrying these fixes, remove all three patch
 entries and vendor directories together, regenerate the lockfile, adapt the
 regression dependency, and replace this guard with checks for the new stack.

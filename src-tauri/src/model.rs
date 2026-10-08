@@ -18,6 +18,8 @@ pub struct Entry {
     pub kind: String,
     pub title: String,
     pub tags: Vec<String>,
+    #[serde(default)]
+    pub aliases: Vec<String>,
     pub modified: u64,
 }
 
@@ -25,6 +27,8 @@ pub struct Entry {
 pub struct Snapshot {
     pub workspace: Workspace,
     pub entries: Vec<Entry>,
+    pub warnings: Vec<String>,
+    pub incomplete: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

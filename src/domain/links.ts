@@ -9,6 +9,8 @@ type Lookup = {
   hasWorkspace: (id: string) => boolean;
   path: (workspaceId: string, path: string) => string | undefined;
   name: (basename: string) => Match[];
+  title: (title: string) => Match[];
+  alias: (alias: string) => Match[];
 };
 export type NoteLinkResolver = (
   target: string,
@@ -22,22 +24,31 @@ export function resolveNoteLink(
   source: string,
   entries: Record<string, Entry[]>,
 ): Resolution {
+  const matching = (matches: (entry: Entry) => boolean) =>
+    Object.entries(entries).flatMap(([id, files]) =>
+      files
+        .filter((entry) => entry.kind === "note" && matches(entry))
+        .map((entry) => ({ workspaceId: id, path: entry.path })),
+    );
   return resolveWithLookup(target, workspaceId, source, {
     hasWorkspace: (id) => Object.hasOwn(entries, id),
     path: (id, path) =>
       entries[id]?.find(
-        (e) =>
-          e.kind === "note" && (e.path === path || e.path === path + ".md"),
+        (entry) =>
+          entry.kind === "note" &&
+          (entry.path === path || entry.path === path + ".md"),
       )?.path,
     name: (name) =>
-      Object.entries(entries).flatMap(([id, files]) =>
-        files
-          .filter(
-            (e) =>
-              e.kind === "note" &&
-              basename(e.path).replace(/\.md$/i, "") === name,
-          )
-          .map((e) => ({ workspaceId: id, path: e.path })),
+      matching((entry) => basename(entry.path).replace(/\.md$/i, "") === name),
+    title: (name) =>
+      matching(
+        (entry) => entry.title.normalize("NFC") === name.normalize("NFC"),
+      ),
+    alias: (name) =>
+      matching((entry) =>
+        (entry.aliases ?? []).some(
+          (alias) => alias.normalize("NFC") === name.normalize("NFC"),
+        ),
       ),
   });
 }
@@ -48,6 +59,8 @@ export function createNoteLinkResolver(
 ): NoteLinkResolver {
   const paths = new Map<string, Map<string, string>>();
   const names = new Map<string, Match[]>();
+  const titles = new Map<string, Match[]>();
+  const aliases = new Map<string, Match[]>();
   for (const [id, files] of Object.entries(entries)) {
     const workspacePaths = new Map<string, string>();
     paths.set(id, workspacePaths);
@@ -63,12 +76,26 @@ export function createNoteLinkResolver(
       const matches = names.get(name) ?? [];
       matches.push({ workspaceId: id, path: entry.path });
       names.set(name, matches);
+      for (const [index, labels] of [
+        [titles, [entry.title]],
+        [aliases, entry.aliases ?? []],
+      ] as const) {
+        for (const label of new Set(
+          labels.map((value) => value.normalize("NFC")),
+        )) {
+          const values = index.get(label) ?? [];
+          values.push({ workspaceId: id, path: entry.path });
+          index.set(label, values);
+        }
+      }
     }
   }
   const lookup: Lookup = {
     hasWorkspace: (id) => paths.has(id),
     path: (id, path) => paths.get(id)?.get(path),
     name: (name) => names.get(name) ?? [],
+    title: (name) => titles.get(name.normalize("NFC")) ?? [],
+    alias: (name) => aliases.get(name.normalize("NFC")) ?? [],
   };
   return (target, workspaceId, source) =>
     resolveWithLookup(target, workspaceId, source, lookup);
@@ -86,6 +113,9 @@ function resolveWithLookup(
   const colon = raw.indexOf(":");
   const prefix = raw.slice(0, colon);
   const qualified = colon > 0 && lookup.hasWorkspace(prefix);
+  const explicitPath = qualified
+    ? raw.slice(colon + 1).startsWith("/")
+    : raw.startsWith("/");
   if (qualified) {
     workspaceId = prefix;
     raw = "/" + raw.slice(colon + 1).replace(/^\//, "");
@@ -97,13 +127,20 @@ function resolveWithLookup(
     const match = lookup.path(workspaceId, path);
     if (match) return { kind: "found", workspaceId, path: match };
   }
-  if (qualified || raw.startsWith("/")) return { kind: "missing" };
+  if (explicitPath) return { kind: "missing" };
   const name = basename(root ?? raw).replace(/\.md$/i, "");
-  const matches = lookup.name(name);
-  const local = matches.filter((match) => match.workspaceId === workspaceId);
-  const candidates = local.length ? local : matches;
-  const match = candidates.length === 1 ? candidates[0] : undefined;
-  return match
-    ? { kind: "found", ...match }
-    : { kind: candidates.length ? "ambiguous" : "missing" };
+  for (const readMatches of [
+    () => lookup.name(name),
+    () => lookup.title(root ?? raw),
+    () => lookup.alias(root ?? raw),
+  ]) {
+    const matches = readMatches();
+    const local = matches.filter((match) => match.workspaceId === workspaceId);
+    const candidates = qualified ? local : local.length ? local : matches;
+    if (!candidates.length) continue;
+    return candidates.length === 1
+      ? { kind: "found", ...candidates[0]! }
+      : { kind: "ambiguous" };
+  }
+  return { kind: "missing" };
 }

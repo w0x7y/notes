@@ -4,7 +4,9 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -17,6 +19,8 @@ import {
   X,
 } from "lucide-react";
 import { Sidebar } from "./components/Sidebar";
+import { useShallow } from "zustand/react/shallow";
+import { TabBar, tabId, tabPanelId } from "./components/TabBar";
 import { BrandMark } from "./components/BrandMark";
 const ContentSearchDialog = lazy(() =>
   import("./knowledge/ContentSearchDialog").then((m) => ({
@@ -76,8 +80,6 @@ const SettingsDialog = lazy(() =>
     default: module.SettingsDialog,
   })),
 );
-import { ItemIcon } from "./components/ItemIcon";
-import { entryColor } from "./domain/appearance";
 const NotePane = lazy(() =>
   import("./components/NotePane").then((module) => ({
     default: module.NotePane,
@@ -109,6 +111,7 @@ import {
   cycleTab,
   focusPane,
   refreshWorkspace,
+  observeWorkspaceInvalidations,
   renameNote,
   run,
   showError,
@@ -116,13 +119,15 @@ import {
   updateWorkspace,
   useApp,
 } from "./domain/app-store";
-import { basename } from "./domain/notes";
 import { sessionFocusedPath } from "./domain/workspace-session";
 import {
   commandForShortcut,
   createWorkspaceCommands,
+  type CommandContext,
 } from "./domain/workspace-commands";
 import { chooseWorkspaceFolder, files } from "./platform";
+import { listenWorkspaceChanges } from "./platform/workspace-events";
+import { startWorkspaceWatch } from "./domain/workspace-watch";
 
 type Modal =
   | { kind: "search"; query: string }
@@ -147,6 +152,45 @@ type Modal =
   | { kind: "remove-workspace"; id: string; name: string; path: string }
   | null;
 
+const noEntries: import("./domain/contracts").Entry[] = [];
+const noSession = emptySession();
+const noAppearances: Record<string, import("./domain/contracts").Appearance> =
+  {};
+
+function commandContext(
+  modal: Modal,
+  purpose: "availability" | "execution",
+): CommandContext {
+  const current = useApp.getState();
+  const id = current.activeWorkspaceId;
+  return {
+    workspace: id
+      ? {
+          id,
+          selectedFolder: current.selectedFolder,
+          focusedPath: sessionFocusedPath(
+            currentSession(),
+            current.focusedPane,
+          ),
+        }
+      : null,
+    modal:
+      purpose === "execution" &&
+      document.querySelector('dialog[open][aria-busy="true"]')
+        ? "busy"
+        : purpose === "execution" &&
+            document.querySelector(".drawing-dialog[open]")
+          ? "drawing"
+          : modal?.kind === "commands"
+            ? "palette"
+            : modal ||
+                (purpose === "execution" &&
+                  document.querySelector("dialog[open]"))
+              ? "dialog"
+              : "none",
+  };
+}
+
 function commitFocusedDraft() {
   const active = document.activeElement;
   if (
@@ -159,20 +203,64 @@ function commitFocusedDraft() {
 }
 
 export default function App() {
-  const state = useApp();
+  const state = useApp(
+    useShallow((state) => ({
+      workspaces: state.workspaces,
+      activeWorkspaceId: state.activeWorkspaceId,
+      entries: state.entries[state.activeWorkspaceId ?? ""] ?? noEntries,
+      session: state.sessions[state.activeWorkspaceId ?? ""] ?? noSession,
+      appearances:
+        state.appearances[state.activeWorkspaceId ?? ""] ?? noAppearances,
+      selectedFolder: state.selectedFolder,
+      focusedPane: state.focusedPane,
+      ready: state.ready,
+      notice: state.notice,
+    })),
+  );
   const [modal, setModal] = useState<Modal>(null);
   const [sidebar, setSidebar] = useState(true);
+  const [paneDocuments, setPaneDocuments] = useState<{
+    primary: NoteDocument | null;
+    secondary: NoteDocument | null;
+  }>({ primary: null, secondary: null });
+  const primaryDocumentChanged = useCallback(
+    (document: NoteDocument | null) => {
+      setPaneDocuments((previous) =>
+        previous.primary === document
+          ? previous
+          : { ...previous, primary: document },
+      );
+    },
+    [],
+  );
+  const secondaryDocumentChanged = useCallback(
+    (document: NoteDocument | null) => {
+      setPaneDocuments((previous) =>
+        previous.secondary === document
+          ? previous
+          : { ...previous, secondary: document },
+      );
+    },
+    [],
+  );
   const selectedFolder = state.selectedFolder;
-  const setSelectedFolder = (path: string) =>
+  const setSelectedFolder = useCallback((path: string) => {
     useApp.setState({ selectedFolder: path });
+  }, []);
   const workspace = state.workspaces.find(
     (item) => item.id === state.activeWorkspaceId,
   );
-  const entries = state.entries[workspace?.id ?? ""] ?? [];
-  const session = state.sessions[workspace?.id ?? ""] ?? emptySession();
+  const entries = state.entries;
+  const session = state.session;
   const focusedPath = sessionFocusedPath(session, state.focusedPane);
-  const appearances = state.appearances[workspace?.id ?? ""] ?? {};
-  const closeModal = () => setModal(null);
+  const paneDocument = paneDocuments[state.focusedPane];
+  const focusedDocument =
+    paneDocument?.workspaceId === workspace?.id &&
+    paneDocument?.getSnapshot().path === focusedPath
+      ? paneDocument
+      : null;
+  const appearances = state.appearances;
+  const closeModal = useCallback(() => setModal(null), []);
   const openRename = useCallback(
     (document: NoteDocument) => setModal({ kind: "rename", document }),
     [],
@@ -180,46 +268,25 @@ export default function App() {
 
   const openFolder = useCallback(async () => {
     const path = await chooseWorkspaceFolder();
-    if (path) {
-      await addWorkspace(path);
-      setSelectedFolder("");
-    }
+    if (path) await addWorkspace(path);
   }, []);
+  const committedModal = useRef(modal);
+  useLayoutEffect(() => {
+    committedModal.current = modal;
+  }, [modal]);
+  const availableContext = useMemo<CommandContext>(
+    () => ({
+      workspace: workspace
+        ? { id: workspace.id, selectedFolder, focusedPath }
+        : null,
+      modal: modal?.kind === "commands" ? "palette" : modal ? "dialog" : "none",
+    }),
+    [workspace, selectedFolder, focusedPath, modal],
+  );
   const workspaceCommands = useMemo(
     () =>
       createWorkspaceCommands({
-        context: (purpose) => {
-          const current = useApp.getState();
-          const id = current.activeWorkspaceId;
-          return {
-            workspace: id
-              ? {
-                  id,
-                  selectedFolder: current.selectedFolder,
-                  focusedPath: sessionFocusedPath(
-                    currentSession(),
-                    current.focusedPane,
-                  ),
-                }
-              : null,
-            // The DOM still contains an exiting dialog during render. Sample
-            // nested drawing/busy dialogs at invocation, not when offering commands.
-            modal:
-              purpose === "execution" &&
-              document.querySelector('dialog[open][aria-busy="true"]')
-                ? "busy"
-                : purpose === "execution" &&
-                    document.querySelector(".drawing-dialog[open]")
-                  ? "drawing"
-                  : modal?.kind === "commands"
-                    ? "palette"
-                    : modal ||
-                        (purpose === "execution" &&
-                          document.querySelector("dialog[open]"))
-                      ? "dialog"
-                      : "none",
-          };
-        },
+        context: (purpose) => commandContext(committedModal.current, purpose),
         global: {
           titles: (query = "") => setModal({ kind: "search", query }),
           contents: () => setModal({ kind: "contents" }),
@@ -251,15 +318,22 @@ export default function App() {
         dismissPalette: () => setModal(null),
         reportError: showError,
       }),
-    [modal, openFolder],
+    [openFolder],
   );
 
   useEffect(() => {
     if (!useApp.getState().ready) void initialize();
   }, []);
   useEffect(() => {
-    setSelectedFolder("");
-  }, [state.activeWorkspaceId]);
+    if (files.kind !== "native") return;
+    const invalidations = observeWorkspaceInvalidations();
+    return startWorkspaceWatch({
+      invalidate: invalidations.invalidate,
+      disposeInvalidations: invalidations.dispose,
+      report: showError,
+      subscribe: listenWorkspaceChanges,
+    });
+  }, []);
   useEffect(() => {
     const keyboard = (event: KeyboardEvent) => {
       const command = commandForShortcut(event);
@@ -316,68 +390,29 @@ export default function App() {
     };
   }, []);
 
-  function renderPane(path: string | null, pane: "primary" | "secondary") {
-    if (!workspace) return null;
-    const entry = entries.find((item) => item.path === path);
-    return (
-      <section
-        className={`editor-pane ${state.focusedPane === pane ? "focused-pane" : ""}`}
-        aria-label={pane === "primary" ? "Primary pane" : "Secondary pane"}
-        onFocusCapture={() => {
-          focusPane(pane);
-        }}
-        onPointerDown={() => {
-          focusPane(pane);
-        }}
-      >
-        {path ? (
-          entry?.kind === "image" ? (
-            <ImagePane workspaceId={workspace.id} path={path} />
-          ) : (
-            <Suspense
-              fallback={<div className="pane-message">Opening editor…</div>}
-            >
-              <NotePane
-                workspaceId={workspace.id}
-                path={path}
-                onRename={openRename}
-              />
-            </Suspense>
-          )
-        ) : (
-          <div className="pane-empty">
-            <BrandMark size={36} />
-            <h2>
-              {pane === "secondary"
-                ? "Open a note beside your work"
-                : "Room for your next thought"}
-            </h2>
-            <p>
-              {pane === "secondary"
-                ? "Select this pane, then choose a note from the sidebar."
-                : "Choose a note, search your workspaces, or start writing."}
-            </p>
-            <button
-              className="button"
-              onClick={() => {
-                void workspaceCommands.dispatch("new", "button");
-              }}
-            >
-              <Plus size={15} />
-              New note <kbd>Ctrl N</kbd>
-            </button>
-          </div>
-        )}
-      </section>
-    );
-  }
+  const openTab = useCallback(
+    (path: string) => {
+      if (workspace) openFile(workspace.id, path);
+    },
+    [workspace],
+  );
+  const closeTab = useCallback(
+    (path: string) => {
+      if (workspace) {
+        commitFocusedDraft();
+        run(closeFile(workspace.id, path));
+      }
+    },
+    [workspace],
+  );
 
-  return (
-    <div
-      className={`app-shell ${sidebar ? "" : "sidebar-hidden"}`}
-      onContextMenu={(event) => event.preventDefault()}
-    >
-      {sidebar && (
+  const availableTools = useMemo(
+    () => workspaceCommands.available("tools", availableContext),
+    [workspaceCommands, availableContext],
+  );
+  const sidebarView = useMemo(
+    () =>
+      sidebar ? (
         <Sidebar
           workspaces={state.workspaces}
           workspace={workspace}
@@ -460,7 +495,7 @@ export default function App() {
               });
           }}
           onWorkspace={switchWorkspace}
-          commands={workspaceCommands.available("tools")}
+          commands={availableTools}
           onCommand={(id) => {
             void workspaceCommands.dispatch(id, "tools");
           }}
@@ -480,112 +515,171 @@ export default function App() {
             void workspaceCommands.dispatch("folder", "button");
           }}
         />
-      )}
+      ) : null,
+    [
+      sidebar,
+      state.workspaces,
+      workspace,
+      entries,
+      appearances,
+      focusedPath,
+      selectedFolder,
+      setSelectedFolder,
+      workspaceCommands,
+      availableTools,
+    ],
+  );
+
+  function renderPane(path: string | null, pane: "primary" | "secondary") {
+    if (!workspace) return null;
+    const entry = entries.find((item) => item.path === path);
+    return (
+      <section
+        className={`editor-pane ${state.focusedPane === pane ? "focused-pane" : ""}`}
+        role={path ? "tabpanel" : undefined}
+        id={path ? tabPanelId(workspace.id, path) : undefined}
+        aria-labelledby={path ? tabId(workspace.id, path) : undefined}
+        aria-label={
+          path
+            ? undefined
+            : pane === "primary"
+              ? "Primary pane"
+              : "Secondary pane"
+        }
+        onFocusCapture={() => {
+          focusPane(pane);
+        }}
+        onPointerDown={() => {
+          focusPane(pane);
+        }}
+      >
+        {path ? (
+          entry?.kind === "image" ? (
+            <ImagePane workspaceId={workspace.id} path={path} />
+          ) : (
+            <Suspense
+              fallback={<div className="pane-message">Opening editor…</div>}
+            >
+              <NotePane
+                workspaceId={workspace.id}
+                path={path}
+                onRename={openRename}
+                onDocumentChange={
+                  pane === "primary"
+                    ? primaryDocumentChanged
+                    : secondaryDocumentChanged
+                }
+              />
+            </Suspense>
+          )
+        ) : (
+          <div className="pane-empty">
+            <BrandMark size={36} />
+            <h2>
+              {pane === "secondary"
+                ? "Open a note beside your work"
+                : "Room for your next thought"}
+            </h2>
+            <p>
+              {pane === "secondary"
+                ? "Select this pane, then choose a note from the sidebar."
+                : "Choose a note, search your workspaces, or start writing."}
+            </p>
+            <button
+              className="button"
+              onClick={() => {
+                void workspaceCommands.dispatch("new", "button");
+              }}
+            >
+              <Plus size={15} />
+              New note <kbd>Ctrl N</kbd>
+            </button>
+          </div>
+        )}
+      </section>
+    );
+  }
+
+  return (
+    <div className={`app-shell ${sidebar ? "" : "sidebar-hidden"}`}>
+      {sidebarView}
       <main className="main-shell">
-        <div className="tabbar">
-          <button
-            className="icon-button sidebar-toggle"
-            aria-label={sidebar ? "Hide sidebar" : "Show sidebar"}
-            onClick={() => {
-              void workspaceCommands.dispatch("sidebar", "button");
-            }}
-          >
-            {sidebar ? (
-              <PanelLeftClose size={15} />
-            ) : (
-              <PanelLeftOpen size={15} />
-            )}
-          </button>
-          <div className="tabs" role="tablist" aria-label="Open notes">
-            {session.tabs.map((path) => (
-              <div
-                className={`tab ${focusedPath === path ? "active" : ""}`}
-                key={path}
-                onMouseDown={(event) => {
-                  if (event.button === 1) event.preventDefault();
-                }}
-                onAuxClick={(event) => {
-                  if (event.button === 1) {
-                    event.preventDefault();
-                    if (workspace) {
-                      commitFocusedDraft();
-                      run(closeFile(workspace.id, path));
-                    }
-                  }
+        <TabBar
+          workspaceId={workspace?.id ?? ""}
+          paths={session.tabs}
+          focusedPath={focusedPath}
+          entries={entries}
+          appearances={appearances}
+          onOpen={openTab}
+          onClose={closeTab}
+          leading={
+            <>
+              <button
+                className="icon-button sidebar-toggle"
+                aria-label={sidebar ? "Hide sidebar" : "Show sidebar"}
+                onClick={() => {
+                  void workspaceCommands.dispatch("sidebar", "button");
                 }}
               >
-                <button
-                  className="tab-label"
-                  style={{ color: entryColor(path, appearances) }}
-                  role="tab"
-                  aria-selected={focusedPath === path}
-                  onClick={() => {
-                    if (workspace) openFile(workspace.id, path);
-                  }}
-                >
-                  {(appearances[path]?.icon ||
-                    entries.find((entry) => entry.path === path)?.kind ===
-                      "image") && (
-                    <ItemIcon
-                      name={appearances[path]?.icon}
-                      size={14}
-                      fallback={
-                        entries.find((entry) => entry.path === path)?.kind ===
-                        "image"
-                          ? "image"
-                          : "file"
-                      }
-                    />
-                  )}
-                  <span dir="auto">{basename(path)}</span>
-                </button>
-                <button
-                  className="close-tab"
-                  aria-label={`Close ${basename(path)}`}
-                  onClick={() => {
-                    if (workspace) {
-                      commitFocusedDraft();
-                      run(closeFile(workspace.id, path));
-                    }
-                  }}
-                >
-                  <X size={12} />
-                </button>
-              </div>
-            ))}
-          </div>
-          <div className="tab-actions">
-            {workspace && (
-              <>
-                <button
-                  className="icon-button"
-                  aria-label="Create note"
-                  title="New note (Ctrl+N)"
-                  onClick={() => {
-                    void workspaceCommands.dispatch("new", "button");
-                  }}
-                >
-                  <Plus size={16} />
-                </button>
-                <button
-                  className="icon-button"
-                  aria-label="Toggle split pane"
-                  aria-pressed={session.split}
-                  title="Split pane (Ctrl+\)"
-                  onClick={() => {
-                    void workspaceCommands.dispatch("split", "button");
-                  }}
-                >
-                  {session.split ? (
-                    <PanelRightClose size={16} />
-                  ) : (
-                    <PanelsLeftRight size={16} />
-                  )}
-                </button>
-              </>
-            )}
-          </div>
-        </div>
+                {sidebar ? (
+                  <PanelLeftClose size={15} />
+                ) : (
+                  <PanelLeftOpen size={15} />
+                )}
+              </button>
+            </>
+          }
+          actions={
+            <>
+              {workspace && (
+                <>
+                  <button
+                    className="icon-button"
+                    aria-label="Create note"
+                    title="New note (Ctrl+N)"
+                    onClick={() => {
+                      void workspaceCommands.dispatch("new", "button");
+                    }}
+                  >
+                    <Plus size={16} />
+                  </button>
+                  <button
+                    className="icon-button"
+                    aria-label="Toggle split pane"
+                    aria-pressed={session.split}
+                    title="Split pane (Ctrl+\)"
+                    onClick={() => {
+                      void workspaceCommands.dispatch("split", "button");
+                    }}
+                  >
+                    {session.split ? (
+                      <PanelRightClose size={16} />
+                    ) : (
+                      <PanelsLeftRight size={16} />
+                    )}
+                  </button>
+                </>
+              )}
+            </>
+          }
+        />
+        {session.tabs
+          .filter(
+            (path) =>
+              !state.ready ||
+              !workspace ||
+              (path !== session.primary &&
+                (!session.split || path !== session.secondary)),
+          )
+          .map((path) => (
+            <section
+              key={path}
+              hidden
+              role="tabpanel"
+              id={tabPanelId(workspace?.id ?? "", path)}
+              aria-labelledby={tabId(workspace?.id ?? "", path)}
+            />
+          ))}
         {state.notice && (
           <div className="notice" role="alert">
             <span>{state.notice}</span>
@@ -618,7 +712,10 @@ export default function App() {
               <FolderOpen size={17} />
               Open a workspace
             </button>
-            <span>Existing Obsidian folders work too.</span>
+            <span>
+              Open Markdown files from Obsidian. Plugin features and some syntax
+              are not supported.
+            </span>
           </div>
         ) : (
           <div className={`panes ${session.split ? "split" : ""}`}>
@@ -637,9 +734,7 @@ export default function App() {
         {workspace &&
           focusedPath &&
           entries.find((entry) => entry.path === focusedPath)?.kind !==
-            "image" && (
-            <SaveStatus workspaceId={workspace.id} path={focusedPath} />
-          )}
+            "image" && <SaveStatus document={focusedDocument} />}
         <span className="flex-1" />
         <span>Markdown</span>
         <span className="status-encoding">UTF-8</span>
@@ -651,7 +746,7 @@ export default function App() {
         )}
         {modal?.kind === "commands" && (
           <CommandDialog
-            commands={workspaceCommands.available("palette")}
+            commands={workspaceCommands.available("palette", availableContext)}
             onChoose={(id) => {
               void workspaceCommands.dispatch(id, "palette");
             }}
@@ -712,7 +807,7 @@ export default function App() {
           <AppearanceDialog
             path={modal.path}
             initial={
-              state.appearances[modal.id]?.[
+              useApp.getState().appearances[modal.id]?.[
                 modal.document?.getSnapshot().path ?? modal.path
               ] ?? {
                 icon: null,

@@ -3,6 +3,7 @@ import type { SearchEntry } from "./contracts";
 type IndexedEntry = {
   entry: SearchEntry;
   title: string;
+  aliases: string[];
   tags: string[];
   order: number;
 };
@@ -21,6 +22,7 @@ function index(entries: SearchEntry[]): IndexedEntry[] {
       entry,
       order,
       title: normalized(entry.title),
+      aliases: (entry.aliases ?? []).map(normalized),
       tags: entry.tags.map(normalized),
     }));
   indexes.set(entries, prepared);
@@ -81,7 +83,12 @@ export function searchNotes(
     let score = 0;
     let matched = true;
     for (const term of titles) {
-      const value = fuzzyScore(indexed.title, term);
+      let value = fuzzyScore(indexed.title, term);
+      for (const alias of indexed.aliases) {
+        const aliasScore = fuzzyScore(alias, term);
+        if (aliasScore !== null && (value === null || aliasScore > value))
+          value = aliasScore;
+      }
       if (value === null) {
         matched = false;
         break;
